@@ -22,6 +22,7 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "erasableSyntaxOnly": true,
+    "noImplicitAny": false,
     "noFallthroughCasesInSwitch": true
   },
   "include": [
