@@ -1,5 +1,5 @@
-import React from 'react';
-import { Home, Compass, Bell, MessageCircle, User, TrendingUp, Users, LogOut, CreditCard, Shield, Crown, Settings as SettingsIcon } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Home, Compass, Bell, MessageCircle, User, TrendingUp, Users, LogOut, CreditCard, Shield, Crown, Settings as SettingsIcon, Download } from 'lucide-react';
 
 import { useAuth } from '../context/AuthContext';
 import { useSubscription } from '../context/SubscriptionContext';
@@ -14,6 +14,32 @@ interface SidebarProps {
 export default function Sidebar({ activePage, setActivePage, unreadNotifs, unreadMessages }: SidebarProps) {
   const { profile, signOut } = useAuth();
   const { isActive } = useSubscription();
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isInstallable, setIsInstallable] = useState(false);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setIsInstallable(true);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const handleInstall = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const result = await deferredPrompt.userChoice;
+      if (result.outcome === 'accepted') {
+        setDeferredPrompt(null);
+        setIsInstallable(false);
+      }
+    } else {
+      // Fallback for browsers that don't support beforeinstallprompt
+      alert('To install KSU Connect:\n\n📱 Android: Open in Chrome → Menu → "Install app" or "Add to Home screen"\n💻 Desktop: Open in Chrome → 🔒 (lock icon) → "Install KSU Connect"\n\nOr simply use the browser bookmark!');
+    }
+  };
   const initials = profile?.full_name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
     || profile?.username?.[0]?.toUpperCase() || '?';
 
@@ -95,6 +121,26 @@ export default function Sidebar({ activePage, setActivePage, unreadNotifs, unrea
       </nav>
 
       <div style={{ marginTop: 'auto', paddingTop: 12, borderTop: '1px solid var(--glass-border)' }}>
+        <button
+          className="nav-item"
+          onClick={handleInstall}
+          style={{
+            background: isInstallable ? 'rgba(167, 139, 250, 0.12)' : 'transparent',
+            border: isInstallable ? '1px solid rgba(167, 139, 250, 0.3)' : 'none',
+            marginBottom: 4,
+          }}
+        >
+          <Download size={20} color={isInstallable ? '#a78bfa' : 'var(--text-muted)'} />
+          <span style={{ fontSize: '0.9rem' }}>{isInstallable ? 'Install App' : 'Get the App'}</span>
+          {isInstallable && (
+            <span style={{
+              marginLeft: 'auto', fontSize: '0.6rem', padding: '2px 6px',
+              borderRadius: 999, background: 'rgba(167, 139, 250, 0.2)', color: '#a78bfa', fontWeight: 700,
+            }}>
+              NEW
+            </span>
+          )}
+        </button>
         <button className="nav-item" onClick={signOut}>
           <LogOut size={20} />
           <span style={{ fontSize: '0.9rem' }}>Sign Out</span>
