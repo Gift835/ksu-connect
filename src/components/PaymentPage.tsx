@@ -21,7 +21,8 @@ export default function PaymentPage() {
     const { showToast } = useToast();
     const [promoCode, setPromoCode] = useState('');
     const [redeeming, setRedeeming] = useState(false);
-    const [paying, setPaying] = useState(false);
+    const [payingPremium, setPayingPremium] = useState(false);
+    const [payingLive, setPayingLive] = useState(false);
     const [payments, setPayments] = useState<Payment[]>([]);
     const [loadingPayments, setLoadingPayments] = useState(true);
     const [now, setNow] = useState(() => Date.now());
@@ -79,16 +80,16 @@ export default function PaymentPage() {
     }, [user]);
 
     const handlePay = async () => {
-        setPaying(true);
+        setPayingPremium(true);
         await startSubscriptionPayment();
-        setPaying(false);
+        setPayingPremium(false);
         await refreshPayments();
     };
 
     const handleGoLive = async () => {
-        setPaying(true);
+        setPayingLive(true);
         await startSubscriptionPayment('live');
-        setPaying(false);
+        setPayingLive(false);
         await refreshPayments();
     };
 
@@ -249,8 +250,8 @@ export default function PaymentPage() {
                         </li>
                     </ul>
                     {!isActive && (
-                        <button className="btn btn-primary w-full" onClick={handlePay} disabled={paying}>
-                            {paying
+                        <button className="btn btn-primary w-full" onClick={handlePay} disabled={payingPremium}>
+                            {payingPremium
                                 ? <span className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />
                                 : <><Sparkles size={16} /> Subscribe for ₦{monthlyPrice}</>}
                         </button>
@@ -316,9 +317,9 @@ export default function PaymentPage() {
                             alignItems: 'center',
                             justifyContent: 'center',
                             gap: 8,
-                            opacity: paying ? 0.7 : 1,
-                        }} onClick={handleGoLive} disabled={paying}>
-                            {paying
+                            opacity: payingLive ? 0.7 : 1,
+                        }} onClick={handleGoLive} disabled={payingLive}>
+                            {payingLive
                                 ? <span className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />
                                 : <><Radio size={16} /> Go Live – ₦{livePrice}/month</>}
                         </button>
