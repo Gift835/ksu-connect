@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useSubscription } from '../context/SubscriptionContext';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { CreditCard, Tag, Sparkles, Shield, Check, X, Receipt, Crown, Zap, Gift } from 'lucide-react';
+import { CreditCard, Tag, Sparkles, Shield, Check, X, Receipt, Crown, Zap, Gift, Radio, Video, Monitor } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 type Payment = {
@@ -118,17 +118,17 @@ export default function PaymentPage() {
                     <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
                             {isLive
-                                ? <Crown size={22} color="#a78bfa" />
+                                ? <Radio size={22} color="#a78bfa" />
                                 : isActive
                                     ? <Crown size={22} color="var(--neon-blue)" />
                                     : <Zap size={22} color="var(--text-muted)" />}
                             <h2 style={{ fontSize: '1.15rem' }}>
-                                {isLive ? 'Go Live (Lifetime)' : isActive ? 'Premium Active' : 'Free Plan'}
+                                {isLive ? 'Live Streamer' : isActive ? 'Premium Active' : 'Free Plan'}
                             </h2>
                         </div>
                         <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
                             {isLive
-                                ? 'You are a verified LIVE member! Lifetime access with verified badge ✓.'
+                                ? 'You are a verified LIVE streamer! Verified badge ✓ and streaming access.'
                                 : isActive
                                     ? `Your premium access is active. Renews on ${subscription?.expires_at ? new Date(subscription.expires_at).toLocaleDateString() : 'N/A'}.`
                                     : 'You are on the free plan. Upgrade to access all features.'}
@@ -152,7 +152,8 @@ export default function PaymentPage() {
                             border: '1px solid rgba(167, 139, 250, 0.3)',
                             display: 'flex', alignItems: 'center', gap: 4,
                         }}>
-                            <span>LIFETIME</span>
+                            <Radio size={14} />
+                            <span>LIVE STREAMER</span>
                         </div>
                     )}
                 </div>
@@ -193,10 +194,16 @@ export default function PaymentPage() {
                             <Check size={14} color="var(--neon-blue)" /> Read public posts
                         </li>
                         <li style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}>
+                            <Check size={14} color="var(--neon-blue)" /> Watch live streams
+                        </li>
+                        <li style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}>
                             <Check size={14} color="var(--neon-blue)" /> Basic profile
                         </li>
                         <li style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                             <X size={14} /> Post & interact
+                        </li>
+                        <li style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                            <X size={14} /> Go live / stream
                         </li>
                     </ul>
                 </div>
@@ -232,6 +239,9 @@ export default function PaymentPage() {
                             <Check size={14} color="var(--neon-blue)" /> Send messages
                         </li>
                         <li style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}>
+                            <Check size={14} color="var(--neon-blue)" /> Watch live streams
+                        </li>
+                        <li style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}>
                             <Check size={14} color="var(--neon-blue)" /> Verified badge eligible
                         </li>
                         <li style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}>
@@ -252,7 +262,7 @@ export default function PaymentPage() {
                     )}
                 </div>
 
-                {/* Go Live plan */}
+                {/* Go Live plan - now monthly with streaming */}
                 <div className="glass-card" style={{
                     padding: 22, position: 'relative', overflow: 'hidden',
                     border: '1px solid rgba(167, 139, 250, 0.5)',
@@ -263,18 +273,21 @@ export default function PaymentPage() {
                         background: 'linear-gradient(135deg, #a78bfa, #7c3aed)', color: 'white', fontSize: '0.65rem',
                         fontWeight: 800, padding: '4px 32px', letterSpacing: 1,
                     }}>BEST VALUE</div>
-                    <div style={{ fontSize: '0.75rem', color: '#a78bfa', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700 }}>Go Live</div>
+                    <div style={{ fontSize: '0.75rem', color: '#a78bfa', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700 }}>Live Streamer</div>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, margin: '8px 0 2px' }}>
                         <div style={{ fontSize: '1.8rem', fontWeight: 800 }}>₦{livePrice}</div>
-                        <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>one-time</div>
+                        <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>/month</div>
                     </div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 16 }}>Lifetime access • Pay once, never again</div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 16 }}>Billed monthly • Cancel anytime</div>
                     <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
                         <li style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}>
                             <Check size={14} color="#a78bfa" /> Everything in Premium
                         </li>
                         <li style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}>
-                            <Check size={14} color="#a78bfa" /> Lifetime access (no monthly fees)
+                            <Check size={14} color="#a78bfa" /> <strong>Go live & stream</strong> to all followers
+                        </li>
+                        <li style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}>
+                            <Check size={14} color="#a78bfa" /> Live video broadcasting
                         </li>
                         <li style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}>
                             <Check size={14} color="#a78bfa" /> Verified badge ✓ on profile
@@ -307,7 +320,7 @@ export default function PaymentPage() {
                         }} onClick={handleGoLive} disabled={paying}>
                             {paying
                                 ? <span className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />
-                                : <><Crown size={16} /> Go Live – ₦{livePrice}</>}
+                                : <><Radio size={16} /> Go Live – ₦{livePrice}/month</>}
                         </button>
                     )}
                     {(isLive || (isActive && subscription?.plan === 'live')) && (
@@ -403,6 +416,15 @@ export default function PaymentPage() {
                         ))}
                     </div>
                 )}
+            </div>
+
+            {/* Live streaming info */}
+            <div className="glass-card" style={{ padding: 16, marginTop: 16, display: 'flex', alignItems: 'center', gap: 12, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                <Video size={20} className="gradient-text" />
+                <div>
+                    <strong style={{ color: 'var(--text-primary)' }}>Live Streaming</strong>
+                    <p style={{ marginTop: 4 }}>Go Live streamers can broadcast video to all followers in real-time. Start a stream from your profile or the feed.</p>
+                </div>
             </div>
         </div>
     );
