@@ -57,22 +57,22 @@ export default function LoginScreen() {
       {/* Animated gradient orbs */}
       <div style={{
         position: 'fixed', top: '-5%', left: '-10%', width: 500, height: 500,
-        borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,107,107,0.25) 0%, transparent 65%)',
+        borderRadius: '50%', background: 'radial-gradient(circle, rgba(59,130,246,0.25) 0%, transparent 65%)',
         animation: 'bgPulse 6s ease-in-out infinite alternate', pointerEvents: 'none'
       }} />
       <div style={{
         position: 'fixed', bottom: '-5%', right: '-5%', width: 600, height: 600,
-        borderRadius: '50%', background: 'radial-gradient(circle, rgba(78,205,196,0.2) 0%, transparent 65%)',
+        borderRadius: '50%', background: 'radial-gradient(circle, rgba(6,182,212,0.2) 0%, transparent 65%)',
         animation: 'bgPulse 8s ease-in-out infinite alternate-reverse', pointerEvents: 'none'
       }} />
       <div style={{
         position: 'fixed', top: '30%', right: '15%', width: 400, height: 400,
-        borderRadius: '50%', background: 'radial-gradient(circle, rgba(168,85,247,0.18) 0%, transparent 65%)',
+        borderRadius: '50%', background: 'radial-gradient(circle, rgba(139,92,246,0.18) 0%, transparent 65%)',
         animation: 'bgPulse 10s ease-in-out infinite alternate', pointerEvents: 'none'
       }} />
       <div style={{
         position: 'fixed', bottom: '30%', left: '10%', width: 350, height: 350,
-        borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,107,107,0.12) 0%, transparent 60%)',
+        borderRadius: '50%', background: 'radial-gradient(circle, rgba(59,130,246,0.12) 0%, transparent 60%)',
         animation: 'bgPulse 12s ease-in-out infinite alternate-reverse', pointerEvents: 'none'
       }} />
 
@@ -82,8 +82,8 @@ export default function LoginScreen() {
           <div style={{
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             width: 80, height: 80, borderRadius: '50%', marginBottom: 16,
-            background: 'linear-gradient(135deg, #ff6b6b 0%, #ee5a24 30%, #a855f7 70%, #4ecdc4 100%)',
-            boxShadow: '0 0 50px rgba(255,107,107,0.5), 0 0 100px rgba(168,85,247,0.3)',
+            background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 50%, #06b6d4 100%)',
+            boxShadow: '0 0 50px rgba(59,130,246,0.5), 0 0 100px rgba(139,92,246,0.3)',
             animation: 'bgPulse 3s ease-in-out infinite alternate',
           }}>
             <Sparkles size={36} color="white" />

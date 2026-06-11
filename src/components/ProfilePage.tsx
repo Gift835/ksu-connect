@@ -198,10 +198,10 @@ export default function ProfilePage({ userId, setActivePage }: { userId?: string
         {/* Avatar */}
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', paddingTop: 8 }}>
           <div style={{ position: 'relative' }}>
-            <div className="avatar-ring" style={{ padding: 3, display: 'inline-block', background: 'var(--gradient-brand)', borderRadius: '50%' }}>
+            <div className="avatar-ring profile-avatar-ring" style={{ padding: 3, display: 'inline-block', background: 'var(--gradient-brand)', borderRadius: '50%' }}>
               {profile.avatar_url
-                ? <img src={profile.avatar_url} className="avatar" style={{ width: 90, height: 90, border: '3px solid var(--bg-primary)' }} alt={profile.username} />
-                : <div className="avatar-placeholder" style={{ width: 90, height: 90, fontSize: '2rem', border: '3px solid var(--bg-primary)' }}>{initials}</div>}
+                ? <img src={profile.avatar_url} className="avatar profile-avatar-img" alt={profile.username} />
+                : <div className="avatar-placeholder profile-avatar-img" style={{ fontSize: '2rem', border: '3px solid var(--bg-primary)' }}>{initials}</div>}
             </div>
             {isOwn && (
               <>

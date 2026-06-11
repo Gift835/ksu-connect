@@ -3,13 +3,13 @@
 /* ===== CSS DESIGN TOKENS ===== */
 :root {
   /* Colors */
-  --coral: #ff6b6b;
-  --coral-light: #ff8e8e;
-  --coral-dark: #e55555;
-  --neon-blue: #4ecdc4;
-  --neon-blue-light: #7eddd7;
-  --neon-purple: #a855f7;
-  --neon-pink: #ec4899;
+  --coral: #3b82f6;
+  --coral-light: #60a5fa;
+  --coral-dark: #2563eb;
+  --neon-blue: #06b6d4;
+  --neon-blue-light: #22d3ee;
+  --neon-purple: #8b5cf6;
+  --neon-pink: #d946ef;
   --gold: #f59e0b;
 
   /* Backgrounds */
@@ -23,27 +23,27 @@
   /* Glass */
   --glass-bg: rgba(255, 255, 255, 0.05);
   --glass-border: rgba(255, 255, 255, 0.1);
-  --glass-border-hover: rgba(255, 107, 107, 0.4);
+  --glass-border-hover: rgba(59, 130, 246, 0.4);
   --glass-blur: blur(20px);
 
   /* Text */
   --text-primary: #f0f0f5;
   --text-secondary: #a0a0b5;
   --text-muted: #606075;
-  --text-accent: #ff6b6b;
+  --text-accent: #3b82f6;
 
   /* Gradients */
-  --gradient-brand: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 30%, #a855f7 70%, #4ecdc4 100%);
-  --gradient-card: linear-gradient(135deg, rgba(255, 107, 107, 0.1) 0%, rgba(78, 205, 196, 0.05) 100%);
+  --gradient-brand: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 50%, #06b6d4 100%);
+  --gradient-card: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(139, 92, 246, 0.05) 100%);
   --gradient-sidebar: linear-gradient(180deg, #0f0f1a 0%, #0a0a0f 100%);
   --gradient-hero: linear-gradient(135deg, #0a0a0f 0%, #1a0a1f 50%, #0a1a1f 100%);
 
   /* Shadows */
   --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.4);
-  --shadow-glow-coral: 0 0 30px rgba(255, 107, 107, 0.3);
-  --shadow-glow-blue: 0 0 30px rgba(78, 205, 196, 0.3);
-  --shadow-glow-purple: 0 0 30px rgba(168, 85, 247, 0.3);
-  --shadow-btn: 0 4px 20px rgba(255, 107, 107, 0.4);
+  --shadow-glow-coral: 0 0 30px rgba(59, 130, 246, 0.3);
+  --shadow-glow-blue: 0 0 30px rgba(6, 182, 212, 0.3);
+  --shadow-glow-purple: 0 0 30px rgba(139, 92, 246, 0.3);
+  --shadow-btn: 0 4px 20px rgba(59, 130, 246, 0.4);
 
   /* Borders */
   --border-radius-sm: 8px;
@@ -1404,6 +1404,29 @@ textarea.input {
 .messages-layout {
   display: grid;
   grid-template-columns: minmax(220px, 280px) 1fr;
+}
+
+/* ===== PROFILE AVATAR RESPONSIVE ===== */
+.profile-avatar-ring {
+  width: 90px;
+  height: 90px;
+}
+
+.profile-avatar-img {
+  width: 84px;
+  height: 84px;
+}
+
+@media (max-width: 480px) {
+  .profile-avatar-ring {
+    width: 72px;
+    height: 72px;
+  }
+
+  .profile-avatar-img {
+    width: 66px;
+    height: 66px;
+  }
 }
 
 /* ===== RESPONSIVE ===== */
