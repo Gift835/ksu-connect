@@ -22,50 +22,102 @@ export interface MonnifyCheckoutOptions {
     onClose: () => void;
 }
 
+// Try multiple possible script URLs for Monnify SDK
+const SCRIPT_URLS = [
+    `${MONNIFY_BASE_URL}/merchant/inline/monnify.js`,      // New/alternate endpoint
+    `${MONNIFY_BASE_URL}/merchant/scripts/monnify.js`,     // Updated endpoint
+    `${MONNIFY_BASE_URL}/merchant/scripts/monnify-direct.js`, // Old endpoint (backup)
+];
+
+let scriptLoadAttempted = false;
+let scriptLoadSuccess = false;
+let currentScriptIndex = 0;
+
+function loadScript(index: number, opts: MonnifyCheckoutOptions) {
+    if (index >= SCRIPT_URLS.length) {
+        alert(
+            'Failed to load Monnify payment SDK from all endpoints.\n\n' +
+            'Please verify your Monnify configuration:\n' +
+            `API Key: ${MONNIFY_API_KEY.slice(0, 8)}...\n` +
+            `Contract: ${MONNIFY_CONTRACT_CODE.slice(0, 6)}...\n` +
+            `Base URL: ${MONNIFY_BASE_URL}\n\n` +
+            'Check your .env file and make sure these values are correct.'
+        );
+        opts.onClose();
+        return;
+    }
+
+    const script = document.createElement('script');
+    script.src = SCRIPT_URLS[index];
+    script.async = true;
+    script.onload = () => {
+        scriptLoadAttempted = true;
+        scriptLoadSuccess = true;
+        // Small delay to ensure SDK is fully initialized
+        setTimeout(() => launch(opts), 300);
+    };
+    script.onerror = () => {
+        console.warn(`Monnify script URL ${SCRIPT_URLS[index]} failed, trying next...`);
+        currentScriptIndex++;
+        loadScript(currentScriptIndex, opts);
+    };
+    document.body.appendChild(script);
+}
+
 /**
  * Open Monnify inline checkout in a popup
  */
 export function openMonnifyCheckout(opts: MonnifyCheckoutOptions) {
     if (!MONNIFY_API_KEY || !MONNIFY_CONTRACT_CODE) {
-        alert('Monnify is not configured. Please add VITE_MONNIFY_API_KEY and VITE_MONNIFY_CONTRACT_CODE to your .env file.');
+        alert(
+            'Monnify is not configured.\n\n' +
+            'Please add these to your .env file:\n' +
+            'VITE_MONNIFY_API_KEY=your_api_key\n' +
+            'VITE_MONNIFY_CONTRACT_CODE=your_contract_code\n\n' +
+            `Current API Key: ${MONNIFY_API_KEY || '(empty)'}\n` +
+            `Current Contract: ${MONNIFY_CONTRACT_CODE || '(empty)'}`
+        );
         opts.onClose();
         return;
     }
 
-    if (!window.MonnifySDK) {
-        const script = document.createElement('script');
-        // Use the correct Monnify script URL - monnify.js not monnify-direct.js
-        script.src = `${MONNIFY_BASE_URL}/merchant/scripts/monnify.js`;
-        script.async = true;
-        script.onload = () => {
-            // Small delay to ensure SDK is fully initialized
-            setTimeout(() => launch(opts), 200);
-        };
-        script.onerror = () => {
-            alert(
-                'Failed to load Monnify payment SDK.\n\n' +
-                'Possible fixes:\n' +
-                '1. Check your internet connection\n' +
-                '2. If using sandbox keys, ensure VITE_MONNIFY_BASE_URL=https://sandbox.monnify.com\n' +
-                '3. If using live keys, use VITE_MONNIFY_BASE_URL=https://app.monnify.com\n' +
-                '4. Make sure your API key and contract code are correct in .env'
-            );
-            opts.onClose();
-        };
-        document.body.appendChild(script);
-    } else {
+    console.log('Monnify configured with:', {
+        apiKey: MONNIFY_API_KEY.slice(0, 8) + '...',
+        contractCode: MONNIFY_CONTRACT_CODE.slice(0, 6) + '...',
+        baseUrl: MONNIFY_BASE_URL,
+        amount: opts.amount,
+        email: opts.customerEmail,
+        reference: opts.paymentReference,
+    });
+
+    if (!window.MonnifySDK && !scriptLoadAttempted) {
+        currentScriptIndex = 0;
+        loadScript(0, opts);
+    } else if (window.MonnifySDK) {
         launch(opts);
+    } else {
+        // Script was attempted but failed - retry with next URL
+        currentScriptIndex++;
+        loadScript(currentScriptIndex, opts);
     }
 }
 
 function launch(opts: MonnifyCheckoutOptions) {
     if (!window.MonnifySDK) {
-        alert('Monnify SDK failed to initialize. Please refresh and try again.');
+        alert(
+            'Monnify SDK is not available.\n\n' +
+            'This could be due to:\n' +
+            '1. An ad blocker blocking the Monnify script\n' +
+            '2. A firewall or network restriction\n' +
+            '3. The Monnify servers being unreachable\n\n' +
+            'Try disabling your ad blocker or use a different network.'
+        );
         opts.onClose();
         return;
     }
 
     try {
+        console.log('Initializing Monnify checkout...');
         window.MonnifySDK.initialize({
             amount: opts.amount,
             currency: 'NGN',
@@ -77,6 +129,7 @@ function launch(opts: MonnifyCheckoutOptions) {
             apiKey: MONNIFY_API_KEY,
             metadata: opts.metadata || {},
             onComplete: (response: any) => {
+                console.log('Monnify onComplete:', response);
                 if (response.status === 'SUCCESS' || response.paymentStatus === 'PAID') {
                     opts.onSuccess({
                         paymentReference: response.paymentReference,
@@ -89,12 +142,17 @@ function launch(opts: MonnifyCheckoutOptions) {
                 }
             },
             onClose: () => {
+                console.log('Monnify onClose');
                 opts.onClose();
             },
         });
     } catch (err) {
         console.error('Monnify error:', err);
-        alert('Monnify initialization failed. Error: ' + (err instanceof Error ? err.message : 'Unknown error'));
+        alert(
+            'Monnify initialization failed.\n\n' +
+            'Error: ' + (err instanceof Error ? err.message : 'Unknown error') + '\n\n' +
+            'Please try again. If the problem persists, contact support.'
+        );
         opts.onClose();
     }
 }
