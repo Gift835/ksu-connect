@@ -86,6 +86,69 @@
   --gradient-hero: linear-gradient(135deg, #f5f7fa 0%, #ffe5e5 50%, #e5f5f5 100%);
 
   --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.08);
+
+  /* Make header icons visible in light mode */
+  --header-icon-bg: rgba(0, 0, 0, 0.05);
+  --header-icon-border: rgba(0, 0, 0, 0.12);
+  --header-icon-color: #4a4a5e;
+}
+
+/* Light mode header overrides */
+[data-theme="light"] .app-header {
+  background: rgba(255, 255, 255, 0.9) !important;
+  border-bottom-color: rgba(0, 0, 0, 0.1) !important;
+}
+
+[data-theme="light"] .btn-icon {
+  background: var(--header-icon-bg) !important;
+  border-color: var(--header-icon-border) !important;
+  color: var(--header-icon-color) !important;
+}
+
+[data-theme="light"] .btn-icon:hover {
+  background: rgba(255, 107, 107, 0.1) !important;
+  color: var(--coral) !important;
+  border-color: rgba(255, 107, 107, 0.3) !important;
+}
+
+[data-theme="light"] .app-header .input {
+  background: rgba(0, 0, 0, 0.04) !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+  color: #1a1a2e !important;
+}
+
+[data-theme="light"] .app-header .input::placeholder {
+  color: #888898 !important;
+}
+
+[data-theme="light"] .mobile-drawer {
+  background: #ffffff !important;
+  border-right-color: rgba(0, 0, 0, 0.1) !important;
+}
+
+[data-theme="light"] .mobile-drawer-header {
+  background: #ffffff !important;
+  border-bottom-color: rgba(0, 0, 0, 0.1) !important;
+}
+
+[data-theme="light"] .mobile-drawer .nav-item {
+  color: #4a4a5e !important;
+}
+
+[data-theme="light"] .mobile-drawer .nav-item:hover {
+  background: rgba(0, 0, 0, 0.04) !important;
+  color: #1a1a2e !important;
+}
+
+[data-theme="light"] .mobile-drawer .nav-item.active {
+  color: var(--coral) !important;
+  background: rgba(255, 107, 107, 0.08) !important;
+}
+
+[data-theme="light"] .mobile-hamburger {
+  background: rgba(255, 107, 107, 0.12) !important;
+  color: var(--coral) !important;
+  border-color: rgba(255, 107, 107, 0.25) !important;
 }
 
 /* Smooth transition for theme switch */
