@@ -94,21 +94,27 @@ export default function ProfilePage({ userId, setActivePage }: { userId?: string
 
   const handleFollow = async () => {
     if (!user || isOwn) return;
-    if (isFollowing) {
-      await supabase.from('follows').delete().eq('follower_id', user.id).eq('following_id', targetId);
-      await supabase.from('profiles').update({ followers_count: Math.max(0, (profile?.followers_count || 1) - 1) }).eq('id', targetId);
-      await supabase.from('profiles').update({ following_count: Math.max(0, (myProfile?.following_count || 1) - 1) }).eq('id', user.id);
-      setIsFollowing(false);
-      setProfile(p => p ? { ...p, followers_count: Math.max(0, p.followers_count - 1) } : p);
-      showToast('Unfollowed');
-    } else {
-      await supabase.from('follows').insert({ follower_id: user.id, following_id: targetId, status: 'accepted' });
-      await supabase.from('profiles').update({ followers_count: (profile?.followers_count || 0) + 1 }).eq('id', targetId);
-      await supabase.from('profiles').update({ following_count: (myProfile?.following_count || 0) + 1 }).eq('id', user.id);
-      setIsFollowing(true);
-      setProfile(p => p ? { ...p, followers_count: p.followers_count + 1 } : p);
-      await supabase.from('notifications').insert({ user_id: targetId, sender_id: user.id, type: 'follow', target_id: user.id, is_read: false });
-      showToast('Following! 🎉');
+    try {
+      if (isFollowing) {
+        await supabase.from('follows').delete().eq('follower_id', user.id).eq('following_id', targetId);
+        await supabase.from('profiles').update({ followers_count: Math.max(0, (profile?.followers_count || 1) - 1) }).eq('id', targetId);
+        await supabase.from('profiles').update({ following_count: Math.max(0, (myProfile?.following_count || 1) - 1) }).eq('id', user.id);
+        setIsFollowing(false);
+        setProfile(p => p ? { ...p, followers_count: Math.max(0, p.followers_count - 1) } : p);
+        await refreshProfile();
+        showToast('Unfollowed');
+      } else {
+        await supabase.from('follows').insert({ follower_id: user.id, following_id: targetId, status: 'accepted' });
+        await supabase.from('profiles').update({ followers_count: (profile?.followers_count || 0) + 1 }).eq('id', targetId);
+        await supabase.from('profiles').update({ following_count: (myProfile?.following_count || 0) + 1 }).eq('id', user.id);
+        setIsFollowing(true);
+        setProfile(p => p ? { ...p, followers_count: p.followers_count + 1 } : p);
+        await supabase.from('notifications').insert({ user_id: targetId, sender_id: user.id, type: 'follow', target_id: user.id, is_read: false });
+        await refreshProfile();
+        showToast('Following! 🎉');
+      }
+    } catch (err) {
+      showToast('Failed to follow/unfollow. Please try again.', 'error');
     }
   };
 
@@ -204,14 +210,14 @@ export default function ProfilePage({ userId, setActivePage }: { userId?: string
           </div>
           {isOwn
             ? <button className="btn btn-secondary btn-sm" onClick={() => setShowEditModal(true)}>
-                <Edit2 size={14} /> Edit Profile
-              </button>
+              <Edit2 size={14} /> Edit Profile
+            </button>
             : <div style={{ display: 'flex', gap: 8 }}>
-                <button className={`btn btn-sm ${isFollowing ? 'btn-secondary' : 'btn-primary'}`} onClick={handleFollow}>
-                  {isFollowing ? 'Following ✓' : 'Follow'}
-                </button>
-                <button className="btn btn-secondary btn-sm" onClick={() => setActivePage(`messages:${profile.id}`)}>Message</button>
-              </div>}
+              <button className={`btn btn-sm ${isFollowing ? 'btn-secondary' : 'btn-primary'}`} onClick={handleFollow}>
+                {isFollowing ? 'Following ✓' : 'Follow'}
+              </button>
+              <button className="btn btn-secondary btn-sm" onClick={() => setActivePage(`messages:${profile.id}`)}>Message</button>
+            </div>}
         </div>
 
         {/* Name & bio */}
@@ -261,16 +267,16 @@ export default function ProfilePage({ userId, setActivePage }: { userId?: string
       {/* Posts */}
       {currentPosts.length === 0
         ? <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
-            <div style={{ fontSize: '2.5rem', marginBottom: 12 }}>
-              {tab === 'Liked' ? '❤️' : tab === 'Media' ? '📷' : '📝'}
-            </div>
-            <p>No {tab.toLowerCase()} yet</p>
+          <div style={{ fontSize: '2.5rem', marginBottom: 12 }}>
+            {tab === 'Liked' ? '❤️' : tab === 'Media' ? '📷' : '📝'}
           </div>
+          <p>No {tab.toLowerCase()} yet</p>
+        </div>
         : currentPosts.map(p => (
-            <PostCard key={p.id} post={p}
-              onDelete={id => setPosts(prev => prev.filter(x => x.id !== id))}
-              setActivePage={setActivePage} />
-          ))
+          <PostCard key={p.id} post={p}
+            onDelete={id => setPosts(prev => prev.filter(x => x.id !== id))}
+            setActivePage={setActivePage} />
+        ))
       }
 
       {/* Edit Profile Modal */}

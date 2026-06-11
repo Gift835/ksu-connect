@@ -34,11 +34,22 @@ export function openMonnifyCheckout(opts: MonnifyCheckoutOptions) {
 
     if (!window.MonnifySDK) {
         const script = document.createElement('script');
-        script.src = `${MONNIFY_BASE_URL}/merchant/scripts/monnify-direct.js`;
+        // Use the correct Monnify script URL - monnify.js not monnify-direct.js
+        script.src = `${MONNIFY_BASE_URL}/merchant/scripts/monnify.js`;
         script.async = true;
-        script.onload = () => launch(opts);
+        script.onload = () => {
+            // Small delay to ensure SDK is fully initialized
+            setTimeout(() => launch(opts), 200);
+        };
         script.onerror = () => {
-            alert('Failed to load Monnify payment SDK. Check your internet connection.');
+            alert(
+                'Failed to load Monnify payment SDK.\n\n' +
+                'Possible fixes:\n' +
+                '1. Check your internet connection\n' +
+                '2. If using sandbox keys, ensure VITE_MONNIFY_BASE_URL=https://sandbox.monnify.com\n' +
+                '3. If using live keys, use VITE_MONNIFY_BASE_URL=https://app.monnify.com\n' +
+                '4. Make sure your API key and contract code are correct in .env'
+            );
             opts.onClose();
         };
         document.body.appendChild(script);
@@ -49,6 +60,7 @@ export function openMonnifyCheckout(opts: MonnifyCheckoutOptions) {
 
 function launch(opts: MonnifyCheckoutOptions) {
     if (!window.MonnifySDK) {
+        alert('Monnify SDK failed to initialize. Please refresh and try again.');
         opts.onClose();
         return;
     }
@@ -82,6 +94,7 @@ function launch(opts: MonnifyCheckoutOptions) {
         });
     } catch (err) {
         console.error('Monnify error:', err);
+        alert('Monnify initialization failed. Error: ' + (err instanceof Error ? err.message : 'Unknown error'));
         opts.onClose();
     }
 }

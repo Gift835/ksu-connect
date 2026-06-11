@@ -1428,4 +1428,63 @@ textarea.input {
     width: 100%;
     max-width: 85vw;
   }
+
+  /* Better mobile profile stats */
+  .profile-stats {
+    gap: 16px !important;
+  }
+
+  .profile-stat .count {
+    font-size: 1rem !important;
+  }
+
+  .profile-stat .label {
+    font-size: 0.7rem !important;
+  }
+
+  /* Post cards full width */
+  .post-card {
+    border-radius: var(--border-radius-md) !important;
+    margin-bottom: 12px !important;
+  }
+
+  .post-caption {
+    padding: 0 12px 10px !important;
+    font-size: 0.85rem !important;
+  }
+
+  .post-actions {
+    padding: 8px 12px !important;
+    gap: 2px !important;
+  }
+
+  .action-btn {
+    padding: 6px 8px !important;
+    font-size: 0.8rem !important;
+  }
+
+  /* Better create post */
+  .create-post {
+    padding: 14px !important;
+    margin-bottom: 12px !important;
+  }
+
+  .create-post-tools {
+    flex-wrap: wrap !important;
+  }
+
+  /* Profile page */
+  .profile-info {
+    padding: 0 16px 16px !important;
+  }
+
+  .profile-cover {
+    height: 140px !important;
+  }
+
+  /* Tabs scrollable */
+  .tabs {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
 }
