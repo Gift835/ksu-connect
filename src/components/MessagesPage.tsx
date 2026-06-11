@@ -105,9 +105,9 @@ export default function MessagesPage({ initialUserId, setActivePage }: { initial
   const myInitials = profile?.full_name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || profile?.username?.[0]?.toUpperCase() || '?';
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 0, height: 'calc(100vh - var(--header-height) - 48px)', background: 'var(--glass-bg)', borderRadius: 'var(--border-radius-lg)', overflow: 'hidden', border: '1px solid var(--glass-border)' }}>
+    <div className="messages-layout" style={{ gap: 0, height: 'calc(100vh - var(--header-height) - 48px)', background: 'var(--glass-bg)', borderRadius: 'var(--border-radius-lg)', overflow: 'hidden', border: '1px solid var(--glass-border)' }}>
       {/* Sidebar */}
-      <div style={{ borderRight: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column' }}>
+      <div className={`messages-sidebar${selectedUser ? '' : ' no-chat-selected'}`} style={{ borderRight: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '16px', borderBottom: '1px solid var(--glass-border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
             <MessageCircle size={18} color="var(--coral)" />
@@ -157,14 +157,18 @@ export default function MessagesPage({ initialUserId, setActivePage }: { initial
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           {/* Chat header */}
           <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button className="btn btn-secondary btn-sm chat-back-btn" style={{ display: 'none', marginRight: 8, padding: '6px 8px' }}
+              onClick={() => setSelectedUser(null)}>
+              ←
+            </button>
             {selectedUser.avatar_url
               ? <img src={selectedUser.avatar_url} className="avatar avatar-sm" alt={selectedUser.username} />
               : <div className="avatar-placeholder avatar-sm" style={{ fontSize: '0.75rem' }}>{selectedUser.username[0].toUpperCase()}</div>}
-            <div>
+            <div style={{ minWidth: 0 }}>
               <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{selectedUser.full_name || selectedUser.username}</div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>@{selectedUser.username}</div>
             </div>
-            <button className="btn btn-secondary btn-sm" style={{ marginLeft: 'auto' }}
+            <button className="btn btn-secondary btn-sm" style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}
               onClick={() => setActivePage(`profile:${selectedUser.id}`)}>View Profile</button>
           </div>
 

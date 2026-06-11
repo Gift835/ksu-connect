@@ -215,6 +215,8 @@ body::before {
 #root {
   position: relative;
   z-index: 1;
+  overflow-x: hidden;
+  width: 100%;
 }
 
 /* ===== SCROLLBAR ===== */
@@ -1203,7 +1205,7 @@ textarea.input {
   color: #f0f0f5;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 20px rgba(78, 205, 196, 0.1);
   animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  min-width: 300px;
+  min-width: 250px;
   max-width: 440px;
 }
 
@@ -1398,6 +1400,12 @@ textarea.input {
   min-width: 0;
 }
 
+/* ===== MESSAGES LAYOUT ===== */
+.messages-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) 1fr;
+}
+
 /* ===== RESPONSIVE ===== */
 @media (max-width: 1100px) {
   .app-layout {
@@ -1406,6 +1414,55 @@ textarea.input {
 
   .app-right {
     display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .app-main {
+    padding: 16px;
+  }
+
+  .app-header {
+    padding: 0 16px;
+    gap: 12px;
+  }
+
+  .profile-stats {
+    gap: 20px;
+  }
+
+  /* Toast responsive */
+  .toast-container {
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+  }
+
+  .toast {
+    min-width: unset;
+    width: 100%;
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 600px) {
+  .messages-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  /* When a chat is selected on mobile, hide conversation list */
+  .messages-layout .messages-sidebar {
+    display: none;
+  }
+
+  .messages-layout .messages-sidebar.no-chat-selected {
+    display: flex;
+  }
+
+  /* Show back button area in chat header on mobile */
+  .messages-layout .chat-back-btn {
+    display: flex;
   }
 }
 
