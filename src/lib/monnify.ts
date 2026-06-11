@@ -22,11 +22,10 @@ export interface MonnifyCheckoutOptions {
     onClose: () => void;
 }
 
-// Try multiple possible script URLs for Monnify SDK
+// Monnify SDK script URLs (corrected endpoints)
 const SCRIPT_URLS = [
-    `${MONNIFY_BASE_URL}/merchant/inline/monnify.js`,      // New/alternate endpoint
-    `${MONNIFY_BASE_URL}/merchant/scripts/monnify.js`,     // Updated endpoint
-    `${MONNIFY_BASE_URL}/merchant/scripts/monnify-direct.js`, // Old endpoint (backup)
+    `${MONNIFY_BASE_URL}/merchant/scripts/monnify-direct.js`,  // Correct primary endpoint
+    `https://widget.monnify.com/monnify.js`,                   // Widget fallback
 ];
 
 let scriptLoadAttempted = false;

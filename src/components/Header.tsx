@@ -303,7 +303,7 @@ export default function Header({ activePage, setActivePage, unreadNotifs, unread
             <span style={{ fontSize: '0.9rem' }}>Sign Out</span>
           </button>
           <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', padding: '12px 16px', textAlign: 'center' }}>
-            KSU Connect © 2025
+            KSU Connect © 2026
           </p>
         </div>
       </div>

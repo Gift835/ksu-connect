@@ -146,7 +146,7 @@ export default function Sidebar({ activePage, setActivePage, unreadNotifs, unrea
           <span style={{ fontSize: '0.9rem' }}>Sign Out</span>
         </button>
         <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', padding: '8px 16px' }}>
-          KSU Connect © 2025
+          KSU Connect © 2026
         </p>
       </div>
     </aside>

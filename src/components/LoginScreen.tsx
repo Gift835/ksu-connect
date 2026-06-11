@@ -54,21 +54,26 @@ export default function LoginScreen() {
       padding: '20px',
       position: 'relative',
     }}>
-      {/* Animated orbs */}
+      {/* Animated gradient orbs */}
       <div style={{
-        position: 'fixed', top: '10%', left: '15%', width: 400, height: 400,
-        borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,107,107,0.12) 0%, transparent 70%)',
+        position: 'fixed', top: '-5%', left: '-10%', width: 500, height: 500,
+        borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,107,107,0.25) 0%, transparent 65%)',
         animation: 'bgPulse 6s ease-in-out infinite alternate', pointerEvents: 'none'
       }} />
       <div style={{
-        position: 'fixed', bottom: '10%', right: '10%', width: 500, height: 500,
-        borderRadius: '50%', background: 'radial-gradient(circle, rgba(78,205,196,0.1) 0%, transparent 70%)',
+        position: 'fixed', bottom: '-5%', right: '-5%', width: 600, height: 600,
+        borderRadius: '50%', background: 'radial-gradient(circle, rgba(78,205,196,0.2) 0%, transparent 65%)',
         animation: 'bgPulse 8s ease-in-out infinite alternate-reverse', pointerEvents: 'none'
       }} />
       <div style={{
-        position: 'fixed', top: '40%', right: '25%', width: 300, height: 300,
-        borderRadius: '50%', background: 'radial-gradient(circle, rgba(168,85,247,0.08) 0%, transparent 70%)',
+        position: 'fixed', top: '30%', right: '15%', width: 400, height: 400,
+        borderRadius: '50%', background: 'radial-gradient(circle, rgba(168,85,247,0.18) 0%, transparent 65%)',
         animation: 'bgPulse 10s ease-in-out infinite alternate', pointerEvents: 'none'
+      }} />
+      <div style={{
+        position: 'fixed', bottom: '30%', left: '10%', width: 350, height: 350,
+        borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,107,107,0.12) 0%, transparent 60%)',
+        animation: 'bgPulse 12s ease-in-out infinite alternate-reverse', pointerEvents: 'none'
       }} />
 
       <div style={{ width: '100%', maxWidth: 460, position: 'relative', zIndex: 1 }}>
@@ -77,8 +82,8 @@ export default function LoginScreen() {
           <div style={{
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             width: 80, height: 80, borderRadius: '50%', marginBottom: 16,
-            background: 'var(--gradient-brand)',
-            boxShadow: '0 0 40px rgba(255,107,107,0.4), 0 0 80px rgba(168,85,247,0.2)',
+            background: 'linear-gradient(135deg, #ff6b6b 0%, #ee5a24 30%, #a855f7 70%, #4ecdc4 100%)',
+            boxShadow: '0 0 50px rgba(255,107,107,0.5), 0 0 100px rgba(168,85,247,0.3)',
             animation: 'bgPulse 3s ease-in-out infinite alternate',
           }}>
             <Sparkles size={36} color="white" />
@@ -86,8 +91,8 @@ export default function LoginScreen() {
           <h1 style={{ fontSize: '2.2rem', fontFamily: 'Outfit, sans-serif', marginBottom: 8 }}>
             <span className="gradient-text">KSU CONNECT</span>
           </h1>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem' }}>
-            The social hub for KSU students &amp; community
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', maxWidth: 340, margin: '0 auto', lineHeight: 1.5 }}>
+            The social hub for KSU students & community
           </p>
         </div>
 
@@ -197,7 +202,7 @@ export default function LoginScreen() {
         </div>
 
         <p style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 24 }}>
-          KSU Connect © 2025 — Connecting the KSU Community
+          KSU Connect © 2026 — Connecting the KSU Community
         </p>
       </div>
     </div>
