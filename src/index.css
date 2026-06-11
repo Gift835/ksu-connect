@@ -1427,6 +1427,26 @@ textarea.input {
     width: 66px;
     height: 66px;
   }
+
+  .profile-info {
+    padding: 0 16px 16px !important;
+  }
+
+  .profile-cover {
+    height: 120px !important;
+    border-radius: var(--border-radius-md) var(--border-radius-md) 0 0 !important;
+  }
+
+  .profile-stats {
+    justify-content: center !important;
+    gap: 24px !important;
+  }
+
+  /* Center the main content on mobile */
+  .app-main {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
 }
 
 /* ===== RESPONSIVE ===== */

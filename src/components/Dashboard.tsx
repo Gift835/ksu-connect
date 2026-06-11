@@ -13,6 +13,7 @@ import MessagesPage from './MessagesPage';
 import PaymentPage from './PaymentPage';
 import AdminPanel from './AdminPanel';
 import SettingsPage from './SettingsPage';
+import FollowersList from './FollowersList';
 import { useToast } from '../context/ToastContext';
 
 
@@ -100,6 +101,10 @@ export default function Dashboard() {
     if (activePage === 'premium') return <PaymentPage />;
     if (activePage === 'admin') return <AdminPanel />;
     if (activePage === 'settings') return <SettingsPage />;
+    if (activePage.startsWith('followers:') || activePage.startsWith('following:')) {
+      const [pageType, uid] = activePage.split(':');
+      return <FollowersList userId={uid} type={pageType as 'followers' | 'following'} setActivePage={handleSetPage} />;
+    }
     return <Feed setActivePage={handleSetPage} />;
 
   };

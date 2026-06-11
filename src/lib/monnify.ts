@@ -22,10 +22,10 @@ export interface MonnifyCheckoutOptions {
     onClose: () => void;
 }
 
-// Monnify SDK script URLs (correct CDN endpoints)
+// Monnify SDK script URLs (correct CDN endpoints with /plugin/ path)
 const SCRIPT_URLS = [
-    `https://sandbox.monnify.com/monnify.js`,  // Sandbox SDK
-    `${MONNIFY_BASE_URL}/monnify.js`,           // Fallback with configured base URL
+    `https://sandbox.monnify.com/plugin/monnify.js`,  // Sandbox SDK
+    `https://monnify.com/plugin/monnify.js`,            // Production fallback
 ];
 
 let scriptLoadAttempted = false;

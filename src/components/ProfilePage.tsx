@@ -245,11 +245,11 @@ export default function ProfilePage({ userId, setActivePage }: { userId?: string
         {/* Stats */}
         <div className="profile-stats">
           {[
-            { label: 'Posts', value: profile.posts_count },
-            { label: 'Followers', value: profile.followers_count },
-            { label: 'Following', value: profile.following_count },
+            { label: 'Posts', value: profile.posts_count, action: undefined },
+            { label: 'Followers', value: profile.followers_count, action: () => setActivePage(`followers:${targetId}`) },
+            { label: 'Following', value: profile.following_count, action: () => setActivePage(`following:${targetId}`) },
           ].map(s => (
-            <div key={s.label} className="profile-stat">
+            <div key={s.label} className="profile-stat" onClick={s.action} style={{ cursor: s.action ? 'pointer' : 'default' }}>
               <div className="count gradient-text">{s.value}</div>
               <div className="label">{s.label}</div>
             </div>
