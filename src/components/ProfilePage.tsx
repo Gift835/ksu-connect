@@ -96,25 +96,32 @@ export default function ProfilePage({ userId, setActivePage }: { userId?: string
     if (!user || isOwn) return;
     try {
       if (isFollowing) {
-        await supabase.from('follows').delete().eq('follower_id', user.id).eq('following_id', targetId);
-        await supabase.from('profiles').update({ followers_count: Math.max(0, (profile?.followers_count || 1) - 1) }).eq('id', targetId);
-        await supabase.from('profiles').update({ following_count: Math.max(0, (myProfile?.following_count || 1) - 1) }).eq('id', user.id);
+        const { error } = await supabase.from('follows').delete().eq('follower_id', user.id).eq('following_id', targetId);
+        if (error) throw error;
         setIsFollowing(false);
+        // Optimistic UI update - triggers will update DB
         setProfile(p => p ? { ...p, followers_count: Math.max(0, p.followers_count - 1) } : p);
+        // Re-fetch to get accurate count from DB
+        setTimeout(() => fetchProfile(), 500);
         await refreshProfile();
         showToast('Unfollowed');
       } else {
-        await supabase.from('follows').insert({ follower_id: user.id, following_id: targetId, status: 'accepted' });
-        await supabase.from('profiles').update({ followers_count: (profile?.followers_count || 0) + 1 }).eq('id', targetId);
-        await supabase.from('profiles').update({ following_count: (myProfile?.following_count || 0) + 1 }).eq('id', user.id);
+        const { error } = await supabase.from('follows').insert({ follower_id: user.id, following_id: targetId, status: 'accepted' });
+        if (error) throw error;
         setIsFollowing(true);
         setProfile(p => p ? { ...p, followers_count: p.followers_count + 1 } : p);
-        await supabase.from('notifications').insert({ user_id: targetId, sender_id: user.id, type: 'follow', target_id: user.id, is_read: false });
+        // Send notification (fire and forget)
+        supabase.from('notifications').insert({
+          user_id: targetId, sender_id: user.id, type: 'follow', target_id: user.id, is_read: false
+        }).then();
+        // Re-fetch to get accurate count from DB
+        setTimeout(() => fetchProfile(), 500);
         await refreshProfile();
         showToast('Following! 🎉');
       }
-    } catch (err) {
-      showToast('Failed to follow/unfollow. Please try again.', 'error');
+    } catch (err: any) {
+      console.error('Follow error:', err);
+      showToast(err?.message || 'Failed to follow/unfollow. Check console for details.', 'error');
     }
   };
 
