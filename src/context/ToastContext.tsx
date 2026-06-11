@@ -24,15 +24,17 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       <div className="toast-container">
         {toasts.map(t => (
           <div key={t.id} className={`toast ${t.type}`}>
-            {t.type === 'success'
-              ? <CheckCircle size={18} color="var(--neon-blue)" />
-              : t.type === 'info'
-                ? <Info size={18} color="var(--neon-purple, #a78bfa)" />
-                : <XCircle size={18} color="var(--coral)" />}
-            <span>{t.message}</span>
+            <span className="toast-icon">
+              {t.type === 'success'
+                ? <CheckCircle size={20} color="#4ecdc4" />
+                : t.type === 'info'
+                  ? <Info size={20} color="#a78bfa" />
+                  : <XCircle size={20} color="#ff6b6b" />}
+            </span>
+            <span className="toast-message">{t.message}</span>
             <button onClick={() => setToasts(p => p.filter(x => x.id !== t.id))}
-              style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
-              <X size={14} />
+              className="toast-close">
+              <X size={16} />
             </button>
           </div>
         ))}
