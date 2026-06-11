@@ -1,5 +1,6 @@
 // Monnify payment helper - client side
 // Monnify's inline checkout (Monnify JS SDK) loads a script and opens a popup
+// NOTE: Monnify takes amount in NAIRA (not Kobo)
 
 declare global {
     interface Window {
@@ -9,10 +10,9 @@ declare global {
 
 const MONNIFY_API_KEY = (import.meta.env.VITE_MONNIFY_API_KEY as string) || '';
 const MONNIFY_CONTRACT_CODE = (import.meta.env.VITE_MONNIFY_CONTRACT_CODE as string) || '';
-const MONNIFY_BASE_URL = (import.meta.env.VITE_MONNIFY_BASE_URL as string) || 'https://sandbox.monnify.com';
 
 export interface MonnifyCheckoutOptions {
-    amount: number; // in kobo (Naira * 100)
+    amount: number; // in NAIRA (e.g. 300 for ₦300)
     customerName: string;
     customerEmail: string;
     paymentReference: string;
@@ -22,123 +22,138 @@ export interface MonnifyCheckoutOptions {
     onClose: () => void;
 }
 
-// Monnify SDK script URLs (correct CDN endpoints with /plugin/ path)
+// Monnify SDK script URLs
 const SCRIPT_URLS = [
-    `https://sandbox.monnify.com/plugin/monnify.js`,  // Sandbox SDK
-    `https://monnify.com/plugin/monnify.js`,            // Production fallback
+    'https://sandbox.monnify.com/plugin/monnify.js',  // Sandbox SDK
+    'https://app.monnify.com/plugin/monnify.js',       // Production SDK
 ];
 
-let scriptLoadAttempted = false;
-let scriptLoadSuccess = false;
-let currentScriptIndex = 0;
+let scriptLoaded = false;
+let scriptLoading = false;
+const pendingQueue: Array<() => void> = [];
 
-function loadScript(index: number, opts: MonnifyCheckoutOptions) {
-    if (index >= SCRIPT_URLS.length) {
-        console.error(
-            'Failed to load Monnify payment SDK from all endpoints.\n' +
-            'API Key: ' + MONNIFY_API_KEY.slice(0, 8) + '...\n' +
-            'Contract: ' + MONNIFY_CONTRACT_CODE.slice(0, 6) + '...\n' +
-            'Base URL: ' + MONNIFY_BASE_URL
-        );
-        opts.onClose();
-        return;
-    }
+function loadMonnifyScript(): Promise<boolean> {
+    return new Promise((resolve) => {
+        // Already loaded
+        if (scriptLoaded && window.MonnifySDK) {
+            resolve(true);
+            return;
+        }
 
-    const script = document.createElement('script');
-    script.src = SCRIPT_URLS[index];
-    script.async = true;
-    script.onload = () => {
-        scriptLoadAttempted = true;
-        scriptLoadSuccess = true;
-        // Small delay to ensure SDK is fully initialized
-        setTimeout(() => launch(opts), 300);
-    };
-    script.onerror = () => {
-        console.warn(`Monnify script URL ${SCRIPT_URLS[index]} failed, trying next...`);
-        currentScriptIndex++;
-        loadScript(currentScriptIndex, opts);
-    };
-    document.body.appendChild(script);
+        // Currently loading — queue up
+        if (scriptLoading) {
+            pendingQueue.push(() => resolve(!!window.MonnifySDK));
+            return;
+        }
+
+        scriptLoading = true;
+
+        const tryLoad = (index: number) => {
+            if (index >= SCRIPT_URLS.length) {
+                scriptLoading = false;
+                resolve(false);
+                pendingQueue.forEach(fn => fn());
+                pendingQueue.length = 0;
+                return;
+            }
+
+            // Remove old failed script tags
+            const existing = document.querySelector(`script[src="${SCRIPT_URLS[index - 1]}"]`);
+            if (existing) existing.remove();
+
+            const script = document.createElement('script');
+            script.src = SCRIPT_URLS[index];
+            script.async = true;
+            script.onload = () => {
+                scriptLoaded = true;
+                scriptLoading = false;
+                setTimeout(() => {
+                    resolve(!!window.MonnifySDK);
+                    pendingQueue.forEach(fn => fn());
+                    pendingQueue.length = 0;
+                }, 400);
+            };
+            script.onerror = () => {
+                console.warn(`Monnify script URL ${SCRIPT_URLS[index]} failed, trying next...`);
+                tryLoad(index + 1);
+            };
+            document.body.appendChild(script);
+        };
+
+        tryLoad(0);
+    });
 }
 
 /**
  * Open Monnify inline checkout in a popup
+ * Amount must be in NAIRA (e.g. 300 for ₦300)
  */
-export function openMonnifyCheckout(opts: MonnifyCheckoutOptions) {
+export async function openMonnifyCheckout(opts: MonnifyCheckoutOptions) {
     if (!MONNIFY_API_KEY || !MONNIFY_CONTRACT_CODE) {
         console.error(
             'Monnify is not configured.\n' +
-            'VITE_MONNIFY_API_KEY=your_api_key\n' +
-            'VITE_MONNIFY_CONTRACT_CODE=your_contract_code\n' +
-            'Current API Key: ' + (MONNIFY_API_KEY || '(empty)') + '\n' +
-            'Current Contract: ' + (MONNIFY_CONTRACT_CODE || '(empty)')
+            'VITE_MONNIFY_API_KEY and VITE_MONNIFY_CONTRACT_CODE must be set in .env'
         );
         opts.onClose();
         return;
     }
 
-    console.log('Monnify configured with:', {
+    console.log('Opening Monnify checkout:', {
         apiKey: MONNIFY_API_KEY.slice(0, 8) + '...',
-        contractCode: MONNIFY_CONTRACT_CODE.slice(0, 6) + '...',
-        baseUrl: MONNIFY_BASE_URL,
-        amount: opts.amount,
+        contractCode: MONNIFY_CONTRACT_CODE,
+        amount: opts.amount + ' NGN',
         email: opts.customerEmail,
         reference: opts.paymentReference,
     });
 
-    if (!window.MonnifySDK && !scriptLoadAttempted) {
-        currentScriptIndex = 0;
-        loadScript(0, opts);
-    } else if (window.MonnifySDK) {
-        launch(opts);
-    } else {
-        // Script was attempted but failed - retry with next URL
-        currentScriptIndex++;
-        loadScript(currentScriptIndex, opts);
-    }
-}
-
-function launch(opts: MonnifyCheckoutOptions) {
-    if (!window.MonnifySDK) {
-        console.error(
-            'Monnify SDK is not available (ad blocker, firewall, or network issue)'
-        );
+    const loaded = await loadMonnifyScript();
+    if (!loaded || !window.MonnifySDK) {
+        console.error('Monnify SDK could not be loaded. Check network/ad-blocker.');
         opts.onClose();
         return;
     }
 
     try {
-        console.log('Initializing Monnify checkout...');
         window.MonnifySDK.initialize({
-            amount: opts.amount,
+            amount: opts.amount,          // Monnify expects NAIRA
             currency: 'NGN',
-            customerName: opts.customerName,
+            reference: opts.paymentReference,
+            customerFullName: opts.customerName,
             customerEmail: opts.customerEmail,
-            paymentReference: opts.paymentReference,
-            paymentDescription: opts.paymentDescription,
-            contractCode: MONNIFY_CONTRACT_CODE,
             apiKey: MONNIFY_API_KEY,
+            contractCode: MONNIFY_CONTRACT_CODE,
+            paymentDescription: opts.paymentDescription,
             metadata: opts.metadata || {},
+            isTestMode: true,              // set false when going live
+            onLoadStart: () => {
+                console.log('Monnify checkout loading...');
+            },
+            onLoadComplete: () => {
+                console.log('Monnify checkout ready');
+            },
             onComplete: (response: any) => {
                 console.log('Monnify onComplete:', response);
-                if (response.status === 'SUCCESS' || response.paymentStatus === 'PAID') {
+                // paymentStatus can be PAID, PENDING, OVERPAID etc.
+                const status = (response.status || response.paymentStatus || '').toUpperCase();
+                if (status === 'SUCCESS' || status === 'PAID' || status === 'OVERPAID') {
                     opts.onSuccess({
-                        paymentReference: response.paymentReference,
-                        transactionReference: response.transactionReference,
+                        paymentReference: response.paymentReference || opts.paymentReference,
+                        transactionReference: response.transactionReference || '',
                         amount: response.amountPaid || opts.amount,
                         channel: response.paymentMethod || 'unknown',
                     });
                 } else {
+                    console.warn('Monnify payment not completed, status:', status);
                     opts.onClose();
                 }
             },
             onClose: () => {
-                console.log('Monnify onClose');
+                console.log('Monnify modal closed by user');
                 opts.onClose();
             },
         });
     } catch (err) {
-        console.error('Monnify error:', err);
+        console.error('Monnify initialize error:', err);
         opts.onClose();
     }
 }

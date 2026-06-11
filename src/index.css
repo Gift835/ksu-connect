@@ -185,6 +185,7 @@ body {
   min-height: 100vh;
   min-height: 100dvh;
   overflow-x: hidden;
+  max-width: 100vw;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -217,6 +218,7 @@ body::before {
   z-index: 1;
   overflow-x: hidden;
   width: 100%;
+  max-width: 100vw;
 }
 
 /* ===== SCROLLBAR ===== */
@@ -561,6 +563,8 @@ textarea.input {
   grid-template-rows: var(--header-height) 1fr;
   min-height: 100vh;
   min-height: 100dvh;
+  max-width: 100vw;
+  overflow-x: hidden;
 }
 
 .app-header {
@@ -576,6 +580,9 @@ textarea.input {
   align-items: center;
   padding: 0 24px;
   gap: 20px;
+  width: 100%;
+  max-width: 100vw;
+  overflow: hidden;
 }
 
 .app-sidebar {
@@ -1525,6 +1532,9 @@ textarea.input {
 @media (max-width: 720px) {
   .app-layout {
     grid-template-columns: 1fr;
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: hidden;
   }
 
   .app-sidebar {
@@ -1534,11 +1544,20 @@ textarea.input {
   .app-main {
     padding: 16px;
     max-width: 100%;
+    width: 100%;
+    overflow-x: hidden;
   }
 
   .app-header {
     padding: 0 12px;
-    gap: 10px;
+    gap: 8px;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  /* Logo text — hide on very small screens */
+  .app-header .header-logo-text {
+    display: none;
   }
 
   /* Make header icons more visible on mobile */
@@ -1648,12 +1667,18 @@ textarea.input {
   }
 
   .app-main {
-    padding: 12px;
+    padding: 8px;
   }
 
   .mobile-drawer {
     width: 100%;
     max-width: 85vw;
+  }
+
+  /* Header action buttons — tighter on small phones */
+  .app-header .btn-icon {
+    width: 36px !important;
+    height: 36px !important;
   }
 
   /* Better mobile profile stats */

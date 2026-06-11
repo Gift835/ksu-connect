@@ -112,11 +112,11 @@ export default function Header({ activePage, setActivePage, unreadNotifs, unread
             <Sparkles size={18} color="white" />
           </div>
           <span style={{ fontFamily: 'Outfit,sans-serif', fontWeight: 800, fontSize: '1.15rem' }}
-            className="gradient-text">KSU CONNECT</span>
+            className="gradient-text header-logo-text">KSU CONNECT</span>
         </div>
 
         {/* Search */}
-        <div ref={searchRef} style={{ flex: 1, maxWidth: 420, position: 'relative' }}>
+        <div ref={searchRef} style={{ flex: 1, minWidth: 0, maxWidth: 420, position: 'relative' }}>
           <div className="input-group">
             <Search size={16} className="input-icon" />
             <input className="input" placeholder="Search people, posts, hashtags..."
@@ -148,7 +148,7 @@ export default function Header({ activePage, setActivePage, unreadNotifs, unread
         </div>
 
         {/* Actions */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto', flexShrink: 0 }}>
           <button className="btn btn-icon" style={{ position: 'relative' }} onClick={() => setActivePage('messages')}>
             <MessageCircle size={20} />
             {unreadMessages > 0 && (

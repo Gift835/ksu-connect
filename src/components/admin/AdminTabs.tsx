@@ -92,22 +92,26 @@ export function PromosTab({ promos, adminId, refresh }: { promos: any[]; adminId
     const [desc, setDesc] = useState('');
     const [maxUses, setMaxUses] = useState(1);
     const [expiresAt, setExpiresAt] = useState('');
+    const [planType, setPlanType] = useState<'monthly' | 'live'>('monthly');
     const [creating, setCreating] = useState(false);
+
+    const planLabel = planType === 'live' ? '₦500 Live Streamer' : '₦300 Premium';
 
     const handleCreate = async () => {
         if (!code.trim()) return showToast('Code is required', 'error');
         setCreating(true);
         const { error } = await supabase.from('promo_codes').insert({
             code: code.trim().toUpperCase(),
-            description: desc.trim() || null,
+            description: desc.trim() || `${planLabel} – ${code.trim().toUpperCase()}`,
             max_uses: maxUses,
             created_by: adminId,
             expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
+            plan_type: planType,
         });
         setCreating(false);
         if (error) { showToast(error.message, 'error'); return; }
-        showToast('Promo code created!', 'success');
-        setCode(''); setDesc(''); setMaxUses(1); setExpiresAt('');
+        showToast(`Promo code created! (${planLabel})`, 'success');
+        setCode(''); setDesc(''); setMaxUses(1); setExpiresAt(''); setPlanType('monthly');
         setShowModal(false);
         refresh();
     };
@@ -161,6 +165,17 @@ export function PromosTab({ promos, adminId, refresh }: { promos: any[]; adminId
                                 color: p.is_active ? '#4ade80' : 'var(--coral)',
                             }}>{p.is_active ? 'ACTIVE' : 'INACTIVE'}</span>
                         </div>
+                        {/* Plan type badge */}
+                        <div style={{ marginBottom: 6 }}>
+                            <span style={{
+                                padding: '2px 8px', borderRadius: 999, fontSize: '0.65rem', fontWeight: 700,
+                                background: p.plan_type === 'live' ? 'rgba(167,139,250,0.18)' : 'rgba(76,201,240,0.15)',
+                                color: p.plan_type === 'live' ? '#a78bfa' : 'var(--neon-blue)',
+                                border: `1px solid ${p.plan_type === 'live' ? 'rgba(167,139,250,0.3)' : 'rgba(76,201,240,0.3)'}`,
+                            }}>
+                                {p.plan_type === 'live' ? '₦500 Live Streamer' : '₦300 Premium'}
+                            </span>
+                        </div>
                         {p.description && <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: '8px 0' }}>{p.description}</p>}
                         <div style={{ display: 'flex', gap: 12, fontSize: '0.75rem', color: 'var(--text-muted)', margin: '8px 0' }}>
                             <span>Uses: <strong>{p.times_used}/{p.max_uses}</strong></span>
@@ -180,34 +195,99 @@ export function PromosTab({ promos, adminId, refresh }: { promos: any[]; adminId
 
             {showModal && (
                 <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setShowModal(false); }}>
-                    <div className="modal">
+                    <div className="modal" style={{ background: '#1e1e38' }}>
                         <div className="modal-header">
-                            <h3 className="modal-title">Create Promo Code</h3>
+                            <h3 className="modal-title" style={{ color: '#f0f0f5' }}>Create Promo Code</h3>
                             <button className="btn btn-icon" onClick={() => setShowModal(false)}><X size={18} /></button>
                         </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+                            {/* Plan Type */}
                             <div>
-                                <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 6, display: 'block' }}>Code *</label>
-                                <input className="input" value={code} onChange={e => setCode(e.target.value.toUpperCase())} placeholder="SUMMER2026" />
+                                <label style={{ fontSize: '0.8rem', color: '#c0c0d5', marginBottom: 8, display: 'block', fontWeight: 600 }}>Plan Type *</label>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                                    <button
+                                        onClick={() => setPlanType('monthly')}
+                                        style={{
+                                            padding: '10px 12px', borderRadius: 10, border: '2px solid',
+                                            borderColor: planType === 'monthly' ? 'var(--neon-blue)' : 'rgba(255,255,255,0.15)',
+                                            background: planType === 'monthly' ? 'rgba(76,201,240,0.15)' : 'rgba(255,255,255,0.06)',
+                                            color: planType === 'monthly' ? 'var(--neon-blue)' : '#c0c0d5',
+                                            cursor: 'pointer', fontWeight: 700, fontSize: '0.85rem', textAlign: 'center',
+                                        }}
+                                    >
+                                        ₦300<br /><span style={{ fontSize: '0.7rem', fontWeight: 400 }}>Premium</span>
+                                    </button>
+                                    <button
+                                        onClick={() => setPlanType('live')}
+                                        style={{
+                                            padding: '10px 12px', borderRadius: 10, border: '2px solid',
+                                            borderColor: planType === 'live' ? '#a78bfa' : 'rgba(255,255,255,0.15)',
+                                            background: planType === 'live' ? 'rgba(167,139,250,0.15)' : 'rgba(255,255,255,0.06)',
+                                            color: planType === 'live' ? '#a78bfa' : '#c0c0d5',
+                                            cursor: 'pointer', fontWeight: 700, fontSize: '0.85rem', textAlign: 'center',
+                                        }}
+                                    >
+                                        ₦500<br /><span style={{ fontSize: '0.7rem', fontWeight: 400 }}>Live Streamer</span>
+                                    </button>
+                                </div>
+                                <p style={{ fontSize: '0.72rem', color: '#888', marginTop: 6 }}>
+                                    Selected: <strong style={{ color: planType === 'live' ? '#a78bfa' : 'var(--neon-blue)' }}>{planLabel}</strong>
+                                </p>
                             </div>
+
+                            {/* Promo Code */}
                             <div>
-                                <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 6, display: 'block' }}>Description (optional)</label>
-                                <input className="input" value={desc} onChange={e => setDesc(e.target.value)} placeholder="e.g. Launch promo" />
+                                <label style={{ fontSize: '0.8rem', color: '#c0c0d5', marginBottom: 6, display: 'block', fontWeight: 600 }}>Code *</label>
+                                <input
+                                    className="input"
+                                    value={code}
+                                    onChange={e => setCode(e.target.value.toUpperCase())}
+                                    placeholder="e.g. LAUNCH2026"
+                                    style={{ background: 'rgba(255,255,255,0.1)', color: '#f0f0f5', borderColor: 'rgba(255,255,255,0.2)', letterSpacing: 2 }}
+                                />
                             </div>
+
+                            {/* Description */}
+                            <div>
+                                <label style={{ fontSize: '0.8rem', color: '#c0c0d5', marginBottom: 6, display: 'block', fontWeight: 600 }}>Description (optional)</label>
+                                <input
+                                    className="input"
+                                    value={desc}
+                                    onChange={e => setDesc(e.target.value)}
+                                    placeholder={`e.g. ${planLabel} launch promo`}
+                                    style={{ background: 'rgba(255,255,255,0.1)', color: '#f0f0f5', borderColor: 'rgba(255,255,255,0.2)' }}
+                                />
+                            </div>
+
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                                 <div>
-                                    <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 6, display: 'block' }}>Max Uses</label>
-                                    <input className="input" type="number" min={1} value={maxUses} onChange={e => setMaxUses(Math.max(1, parseInt(e.target.value) || 1))} />
+                                    <label style={{ fontSize: '0.8rem', color: '#c0c0d5', marginBottom: 6, display: 'block', fontWeight: 600 }}>Max Uses</label>
+                                    <input
+                                        className="input"
+                                        type="number"
+                                        min={1}
+                                        value={maxUses}
+                                        onChange={e => setMaxUses(Math.max(1, parseInt(e.target.value) || 1))}
+                                        style={{ background: 'rgba(255,255,255,0.1)', color: '#f0f0f5', borderColor: 'rgba(255,255,255,0.2)' }}
+                                    />
                                 </div>
                                 <div>
-                                    <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 6, display: 'block' }}>Expires (optional)</label>
-                                    <input className="input" type="date" value={expiresAt} onChange={e => setExpiresAt(e.target.value)} />
+                                    <label style={{ fontSize: '0.8rem', color: '#c0c0d5', marginBottom: 6, display: 'block', fontWeight: 600 }}>Expires (optional)</label>
+                                    <input
+                                        className="input"
+                                        type="date"
+                                        value={expiresAt}
+                                        onChange={e => setExpiresAt(e.target.value)}
+                                        style={{ background: 'rgba(255,255,255,0.1)', color: '#f0f0f5', borderColor: 'rgba(255,255,255,0.2)' }}
+                                    />
                                 </div>
                             </div>
-                            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+
+                            <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
                                 <button className="btn btn-secondary w-full" onClick={() => setShowModal(false)}>Cancel</button>
                                 <button className="btn btn-primary w-full" onClick={handleCreate} disabled={creating}>
-                                    {creating ? <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> : 'Create Code'}
+                                    {creating ? <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> : `Create ${planLabel}`}
                                 </button>
                             </div>
                         </div>

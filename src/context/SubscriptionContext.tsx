@@ -158,7 +158,6 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
 
         const isLive = plan === 'live';
         const amountNaira = isLive ? LIVE_PRICE_NAIRA : MONTHLY_PRICE_NAIRA;
-        const amountKobo = amountNaira * 100;
         const reference = generateReference('ksu_sub');
 
         const { data: payment, error: pErr } = await supabase.from('payments').insert({
@@ -174,7 +173,7 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
 
         return new Promise((resolve) => {
             openMonnifyCheckout({
-                amount: amountKobo,
+                amount: amountNaira,  // Monnify takes NAIRA
                 customerName: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Customer',
                 customerEmail: user.email || '',
                 paymentReference: reference,
@@ -233,8 +232,13 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
                     resolve({ ok: true });
                 },
                 onClose: async () => {
-                    await supabase.from('payments').update({ status: 'failed' }).eq('paystack_reference', reference);
-                    showToast('Payment cancelled', 'info');
+                    // Only mark as failed if the payment is still in pending state
+                    // (not if onSuccess already ran)
+                    await supabase.from('payments')
+                        .update({ status: 'failed' })
+                        .eq('paystack_reference', reference)
+                        .eq('status', 'pending');  // Only update if still pending
+                    showToast('Payment cancelled or not completed', 'info');
                     resolve({ ok: false, error: 'Payment cancelled' });
                 },
             });
