@@ -1,8 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
+import AgoraRTC, {
+    IAgoraRTCClient,
+    ICameraVideoTrack,
+    IMicrophoneAudioTrack,
+    IAgoraRTCRemoteUser,
+} from 'agora-rtc-sdk-ng';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { X, Video, VideoOff, Mic, MicOff, Send, Users, Radio, Eye, Info, Volume2 } from 'lucide-react';
+
+// ─── Your Agora App ID ────────────────────────────────────────────────────────
+const AGORA_APP_ID = '24fe140693de45edbe771b4ffd7b6854';
+
+// Suppress Agora's verbose console logs in production
+AgoraRTC.setLogLevel(3); // 3 = ERROR only
 
 interface LiveStreamModalProps {
     streamId?: string;
@@ -20,649 +32,349 @@ interface ChatMessage {
     timestamp: number;
 }
 
-// ICE config — multiple STUN + TURN with TCP transport for strict NAT/firewalls
-const ICE_SERVERS: RTCConfiguration = {
-    iceServers: [
-        {
-            urls: [
-                'stun:stun.l.google.com:19302',
-                'stun:stun1.l.google.com:19302',
-                'stun:stun2.l.google.com:19302',
-                'stun:stun3.l.google.com:19302',
-                'stun:stun4.l.google.com:19302',
-            ],
-        },
-        // TURN relay — TCP variants bypass strict firewalls & mobile NAT
-        {
-            urls: [
-                'turn:openrelay.metered.ca:80',
-                'turn:openrelay.metered.ca:80?transport=tcp',
-                'turn:openrelay.metered.ca:443?transport=tcp',
-                'turns:openrelay.metered.ca:443',
-            ],
-            username: 'openrelayproject',
-            credential: 'openrelayproject',
-        },
-        // Backup public TURN
-        {
-            urls: 'turn:numb.viagenie.ca',
-            credential: 'muazkh',
-            username: 'webrtc@live.com',
-        },
-    ],
-    iceCandidatePoolSize: 10,
-    bundlePolicy: 'max-bundle',
-    rtcpMuxPolicy: 'require',
-};
-
-export default function LiveStreamModal({ streamId: propStreamId, streamTitle: propStreamTitle, hostId: propHostId, isHost, onClose }: LiveStreamModalProps) {
+export default function LiveStreamModal({
+    streamId: propStreamId,
+    streamTitle: propStreamTitle,
+    isHost,
+    onClose,
+}: LiveStreamModalProps) {
     const { user, profile } = useAuth();
     const { showToast } = useToast();
 
-    // Stream info states
-    const [streamId, setStreamId] = useState<string | null>(propStreamId || null);
-    const [title, setTitle] = useState(propStreamTitle || '');
-    const [isBroadcasting, setIsBroadcasting] = useState(isHost && !!propStreamId);
-    const [viewerCount, setViewerCount] = useState(0);
+    // ── Stream metadata ────────────────────────────────────────────────────
+    const [streamId,       setStreamId]       = useState<string | null>(propStreamId || null);
+    const [title,          setTitle]          = useState(propStreamTitle || '');
+    const [isBroadcasting, setIsBroadcasting] = useState(false);
+    const [viewerCount,    setViewerCount]    = useState(0);
 
-    // Media and Connection states
-    const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-    const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
-    const [videoEnabled, setVideoEnabled] = useState(true);
-    const [audioEnabled, setAudioEnabled] = useState(true);
-    const [loading, setLoading] = useState(!isHost);
+    // ── UI states ──────────────────────────────────────────────────────────
+    const [loading,       setLoading]       = useState(!isHost);
+    const [connected,     setConnected]     = useState(false); // viewer: host track arrived
+    const [cameraReady,   setCameraReady]   = useState(false);
+    const [videoEnabled,  setVideoEnabled]  = useState(true);
+    const [audioEnabled,  setAudioEnabled]  = useState(true);
+    const [viewerMuted,   setViewerMuted]   = useState(true);
+    const [chatOpen,      setChatOpen]      = useState(false);
+    const [chatMessages,  setChatMessages]  = useState<ChatMessage[]>([]);
+    const [messageText,   setMessageText]   = useState('');
+    const [previewReady,  setPreviewReady]  = useState(false); // host camera preview
 
-    // Camera preview before going live
-    const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
-    const [previewLoading, setPreviewLoading] = useState(false);
-    const [cameraReady, setCameraReady] = useState(false);
+    // ── Refs ───────────────────────────────────────────────────────────────
+    const clientRef          = useRef<IAgoraRTCClient | null>(null);
+    const localVideoTrackRef = useRef<ICameraVideoTrack | null>(null);
+    const localAudioTrackRef = useRef<IMicrophoneAudioTrack | null>(null);
+    const remoteAudioTrackRef= useRef<any>(null);    // viewer: host audio track
+    const previewTrackRef    = useRef<ICameraVideoTrack | null>(null); // host setup preview
 
-    // Chat states
-    const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-    const [messageText, setMessageText] = useState('');
-    const [chatOpen, setChatOpen] = useState(false);
-    // Viewer audio state
-    const [viewerMuted, setViewerMuted]     = useState(true);
-    const [viewerVolume, setViewerVolume]   = useState(1);
-    const [hasStream,   setHasStream]       = useState(false); // true once first track arrives
-    const [iceConnState, setIceConnState]   = useState('');
-    const [viewerStatus, setViewerStatus]   = useState('Connecting...');
+    // DOM containers that Agora renders video INTO
+    const localVideoElRef    = useRef<HTMLDivElement>(null);
+    const remoteVideoElRef   = useRef<HTMLDivElement>(null);
+    const previewVideoElRef  = useRef<HTMLDivElement>(null);
 
-    // Refs for video components
-    const localVideoRef = useRef<HTMLVideoElement>(null);
-    const remoteVideoRef = useRef<HTMLVideoElement>(null);
-    const previewVideoRef = useRef<HTMLVideoElement>(null);
-    const chatEndRef = useRef<HTMLDivElement>(null);
+    // Supabase chat channel
+    const chatChannelRef     = useRef<any>(null);
+    const endedChannelRef    = useRef<any>(null);
+    const chatEndRef         = useRef<HTMLDivElement>(null);
 
-    // WebRTC Signaling Refs
-    const channelRef = useRef<any>(null);
-    const streamEndedChannelRef = useRef<any>(null); // separate channel for stream-ended DB watch
-    const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
-    const singlePeerConnectionRef = useRef<RTCPeerConnection | null>(null);
-    const localStreamRef = useRef<MediaStream | null>(null);
-    // Buffer ICE candidates that arrive before remote description is set
-    const pendingCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
-
-    // Auto-scroll chat
+    // ── Auto-scroll chat ───────────────────────────────────────────────────
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [chatMessages]);
 
-    // Start camera preview when host opens modal
+    // ── Host: start camera preview immediately ─────────────────────────────
     useEffect(() => {
-        if (isHost && !isBroadcasting) {
-            startCameraPreview();
-        }
+        if (isHost && !isBroadcasting) startCameraPreview();
         return () => {
-            // When host closes the modal (X button), auto-end the stream in DB
             if (isHost && streamId) {
                 supabase.from('live_streams')
                     .update({ status: 'ended', ended_at: new Date().toISOString() })
-                    .eq('id', streamId)
-                    .eq('status', 'live') // only update if still live
-                    .then(() => {});
+                    .eq('id', streamId).eq('status', 'live').then(() => {});
             }
-            cleanupConnections();
+            cleanup();
         };
     }, []);
 
-    // Attach preview stream to video element
+    // ── Viewer: join as soon as the modal opens ────────────────────────────
     useEffect(() => {
-        if (previewStream && previewVideoRef.current) {
-            previewVideoRef.current.srcObject = previewStream;
+        if (!isHost && streamId) startViewing();
+    }, []);
+
+    // ── Play preview track into div once div is ready ─────────────────────
+    useEffect(() => {
+        if (previewTrackRef.current && previewVideoElRef.current && previewReady) {
+            previewTrackRef.current.play(previewVideoElRef.current);
         }
-    }, [previewStream]);
+    }, [previewReady]);
 
-    // Sync viewerMuted → video.muted via ref (React muted prop is unreliable)
-    useEffect(() => {
-        const vid = remoteVideoRef.current;
-        if (!vid) return;
-        vid.muted = viewerMuted;
-        if (!viewerMuted) vid.play().catch(() => {});
-    }, [viewerMuted]);
+    // ─────────────────────────────────────────────────────────────────────────
+    //  CLEANUP
+    // ─────────────────────────────────────────────────────────────────────────
+    const cleanup = async () => {
+        try {
+            previewTrackRef.current?.stop();
+            previewTrackRef.current?.close();
+            localVideoTrackRef.current?.stop();
+            localVideoTrackRef.current?.close();
+            localAudioTrackRef.current?.stop();
+            localAudioTrackRef.current?.close();
+            if (clientRef.current) await clientRef.current.leave();
+        } catch (_) {}
+        if (chatChannelRef.current)  supabase.removeChannel(chatChannelRef.current);
+        if (endedChannelRef.current) supabase.removeChannel(endedChannelRef.current);
+    };
 
-    // Sync volume
-    useEffect(() => {
-        const vid = remoteVideoRef.current;
-        if (vid) vid.volume = viewerVolume;
-    }, [viewerVolume]);
-
-    // Keep remote stream attached whenever it changes
-    useEffect(() => {
-        if (!remoteStream || !remoteVideoRef.current) return;
-        const video = remoteVideoRef.current;
-        if (video.srcObject !== remoteStream) video.srcObject = remoteStream;
-        video.play().catch(() => {});
-    }, [remoteStream]);
-
+    // ─────────────────────────────────────────────────────────────────────────
+    //  HOST — Camera preview (before going live)
+    // ─────────────────────────────────────────────────────────────────────────
     const startCameraPreview = async () => {
-        setPreviewLoading(true);
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: { width: 640, height: 480, frameRate: 15, facingMode: 'user' },
-                audio: true
+            const camTrack = await AgoraRTC.createCameraVideoTrack({
+                encoderConfig: { width: 640, height: 480, frameRate: 15, bitrateMax: 800 },
             });
-            setPreviewStream(stream);
+            previewTrackRef.current = camTrack;
             setCameraReady(true);
+            setPreviewReady(true);
         } catch (err: any) {
-            showToast('Camera access denied. Please allow camera/mic permissions.', 'error');
-        } finally {
-            setPreviewLoading(false);
+            showToast('Camera access denied — check permissions.', 'error');
         }
     };
 
-    const cleanupConnections = async () => {
-        // Stop preview stream tracks
-        if (previewStream) {
-            previewStream.getTracks().forEach(t => t.stop());
-        }
-        // Stop camera tracks
-        if (localStreamRef.current) {
-            localStreamRef.current.getTracks().forEach(t => t.stop());
-        }
-        // Close host connections
-        peerConnectionsRef.current.forEach(pc => pc.close());
-        peerConnectionsRef.current.clear();
-        // Close viewer connection
-        if (singlePeerConnectionRef.current) {
-            singlePeerConnectionRef.current.close();
-            singlePeerConnectionRef.current = null;
-        }
-        // Unsubscribe signaling channels
-        if (channelRef.current) {
-            supabase.removeChannel(channelRef.current);
-        }
-        if (streamEndedChannelRef.current) {
-            supabase.removeChannel(streamEndedChannelRef.current);
-        }
-    };
-
-    // --- HOST SIDE CODE ---
+    // ─────────────────────────────────────────────────────────────────────────
+    //  HOST — Go Live
+    // ─────────────────────────────────────────────────────────────────────────
     const startStreaming = async () => {
-        if (!title.trim()) {
-            showToast('Please enter a stream title', 'error');
-            return;
-        }
+        if (!title.trim()) { showToast('Please enter a stream title', 'error'); return; }
         setLoading(true);
-
         try {
-            // Use the preview stream if available (so camera is already running)
-            let media: MediaStream;
-            if (previewStream && previewStream.active) {
-                media = previewStream;
-                setPreviewStream(null); // Transfer ownership
+            // 1. Create DB record
+            const { data: stream, error: sErr } = await supabase
+                .from('live_streams')
+                .insert({ host_id: user!.id, title: title.trim(), status: 'live' })
+                .select().single();
+            if (sErr) throw sErr;
+            const sid = stream.id;
+            setStreamId(sid);
+
+            // 2. Create Agora client in live-host mode
+            const client = AgoraRTC.createClient({ mode: 'live', codec: 'h264' });
+            clientRef.current = client;
+            await client.setClientRole('host');
+
+            // 3. Join channel (channel name = stream UUID)
+            await client.join(AGORA_APP_ID, sid, null, user!.id.slice(0, 8));
+
+            // 4. Re-use preview camera track if available, otherwise create fresh
+            let videoTrack: ICameraVideoTrack;
+            if (previewTrackRef.current) {
+                videoTrack = previewTrackRef.current;
+                previewTrackRef.current = null;
             } else {
-                media = await navigator.mediaDevices.getUserMedia({
-                    video: { width: 640, height: 480, frameRate: 15, facingMode: 'user' },
-                    audio: true
+                videoTrack = await AgoraRTC.createCameraVideoTrack({
+                    encoderConfig: { width: 640, height: 480, frameRate: 15, bitrateMax: 800 },
                 });
             }
+            const audioTrack = await AgoraRTC.createMicrophoneAudioTrack();
 
-            setLocalStream(media);
-            localStreamRef.current = media;
+            localVideoTrackRef.current = videoTrack;
+            localAudioTrackRef.current = audioTrack;
 
-            // 2. Insert live_streams record in DB
-            const { data: stream, error: sErr } = await supabase.from('live_streams').insert({
-                host_id: user!.id,
-                title: title.trim(),
-                status: 'live'
-            }).select().single();
+            // 5. Publish both tracks
+            await client.publish([videoTrack, audioTrack]);
 
-            if (sErr) throw sErr;
-            setStreamId(stream.id);
+            // 6. Render local preview
+            if (localVideoElRef.current) videoTrack.play(localVideoElRef.current);
+
+            // 7. Viewer count tracking
+            client.on('user-joined',  () => setViewerCount(c => c + 1));
+            client.on('user-left',    () => setViewerCount(c => Math.max(0, c - 1)));
+
+            // 8. Setup chat
+            setupChatChannel(sid);
+
             setIsBroadcasting(true);
-
-            // Attach to video element
-            if (localVideoRef.current) {
-                localVideoRef.current.srcObject = media;
-            }
-
-            // 3. Initialize signaling channel
-            setupHostSignaling(stream.id, media);
-            showToast('🎥 You are now LIVE! Followers can join from their feed.', 'success');
+            setLoading(false);
+            showToast('🎥 You are now LIVE! Viewers can join from their feed.', 'success');
         } catch (err: any) {
-            console.error('Failed to start stream', err);
-            showToast('Could not access camera/mic: ' + (err.message || err), 'error');
-        } finally {
+            console.error('[KSU-Live] Host start failed:', err);
+            showToast('Could not start stream: ' + (err.message || err), 'error');
             setLoading(false);
         }
     };
 
-    // Attach local stream to video element once both are ready
-    useEffect(() => {
-        if (localStream && localVideoRef.current && isBroadcasting) {
-            localVideoRef.current.srcObject = localStream;
-        }
-    }, [localStream, isBroadcasting]);
-
-    const setupHostSignaling = (channelStreamId: string, media: MediaStream) => {
-        const broadcastChan = supabase.channel(`stream_bcast:${channelStreamId}`);
-
-        // Listen on Broadcast only for: chat messages + ICE candidates from viewers
-        broadcastChan.on('broadcast', { event: '*' }, async ({ event, payload }) => {
-            const { senderId, targetId, candidate, senderName, text } = payload;
-
-            if (event === 'chat') {
-                setChatMessages(prev => [...prev, {
-                    id: Math.random().toString(), senderId, senderName, text, timestamp: Date.now()
-                }]);
-                return;
-            }
-
-            // ICE candidates from viewers — fast path via Broadcast
-            if (event === 'candidate' && targetId === user!.id) {
-                const pc = peerConnectionsRef.current.get(senderId);
-                if (pc && candidate) {
-                    if (pc.remoteDescription) {
-                        try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
-                    } else {
-                        const buf = pendingCandidatesRef.current.get(senderId) || [];
-                        buf.push(candidate);
-                        pendingCandidatesRef.current.set(senderId, buf);
-                    }
-                }
-            }
-        });
-
-        broadcastChan.subscribe();
-        channelRef.current = broadcastChan;
-
-        // *** DATABASE-BACKED SIGNALING — guaranteed delivery ***
-        // Watch for 'join' and 'answer' signals in the DB targeted at host
-        const sigChannel = supabase
-            .channel(`db_signals_host_${channelStreamId}`)
-            .on('postgres_changes', {
-                event: 'INSERT',
-                schema: 'public',
-                table: 'stream_signals',
-                filter: `to_user_id=eq.${user!.id}`,
-            }, async ({ new: signal }: any) => {
-                if (signal.stream_id !== channelStreamId) return;
-
-                if (signal.type === 'join') {
-                    const viewerId = signal.from_user_id;
-                    if (peerConnectionsRef.current.has(viewerId)) return; // already connected
-
-                    console.log('DB signal: viewer joined', viewerId);
-                    const pc = new RTCPeerConnection(ICE_SERVERS);
-                    peerConnectionsRef.current.set(viewerId, pc);
-
-                    // Add all local tracks
-                    media.getTracks().forEach(track => pc.addTrack(track, media));
-
-                    // Send ICE candidates to viewer via Broadcast (fast)
-                    pc.onicecandidate = (e) => {
-                        if (e.candidate && channelRef.current) {
-                            channelRef.current.send({
-                                type: 'broadcast',
-                                event: 'candidate',
-                                payload: { senderId: user!.id, targetId: viewerId, candidate: e.candidate }
-                            });
-                        }
-                    };
-
-                    // Create and store offer in DB
-                    try {
-                        const sdpOffer = await pc.createOffer();
-                        await pc.setLocalDescription(sdpOffer);
-                        await supabase.from('stream_signals').insert({
-                            stream_id: channelStreamId,
-                            from_user_id: user!.id,
-                            to_user_id: viewerId,
-                            type: 'offer',
-                            payload: pc.localDescription,
-                        });
-                        setViewerCount(c => c + 1);
-                        showToast('👀 Someone joined your stream!', 'info');
-                    } catch (err) {
-                        console.error('Failed to create offer:', err);
-                    }
-
-                } else if (signal.type === 'answer') {
-                    const viewerId = signal.from_user_id;
-                    const pc = peerConnectionsRef.current.get(viewerId);
-                    if (pc && signal.payload) {
-                        try {
-                            await pc.setRemoteDescription(new RTCSessionDescription(signal.payload));
-                            // Flush buffered ICE candidates
-                            const pending = pendingCandidatesRef.current.get(viewerId) || [];
-                            for (const c of pending) {
-                                try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
-                            }
-                            pendingCandidatesRef.current.delete(viewerId);
-                        } catch (err) {
-                            console.error('Failed to set answer:', err);
-                        }
-                    }
-                }
-            })
-            .subscribe();
-    };
-
+    // ─────────────────────────────────────────────────────────────────────────
+    //  HOST — Stop
+    // ─────────────────────────────────────────────────────────────────────────
     const stopStreaming = async () => {
-        if (!window.confirm('Are you sure you want to end this live stream?')) return;
+        if (!window.confirm('End this live stream?')) return;
         setLoading(true);
         try {
             if (streamId) {
                 await supabase.from('live_streams')
                     .update({ status: 'ended', ended_at: new Date().toISOString() })
                     .eq('id', streamId);
-                // Also broadcast via realtime so viewers get notified instantly
-                if (channelRef.current) {
-                    channelRef.current.send({
-                        type: 'broadcast',
-                        event: 'stream_ended',
-                        payload: { streamId }
-                    });
-                }
             }
-            cleanupConnections();
-            showToast('Live stream ended successfully', 'success');
+            await cleanup();
+            showToast('Live stream ended.', 'success');
             onClose();
-        } catch (err: any) {
-            console.error('Error ending stream', err);
+        } catch (err) {
             onClose();
         }
     };
 
-    // --- VIEWER SIDE CODE ---
-    useEffect(() => {
-        if (!isHost && streamId) {
-            startViewing();
-        }
-    }, [streamId]);
-
+    // ─────────────────────────────────────────────────────────────────────────
+    //  VIEWER — Join stream
+    // ─────────────────────────────────────────────────────────────────────────
     const startViewing = async () => {
         setLoading(true);
         try {
-            const { data: streamData, error } = await supabase.from('live_streams')
-                .select('*').eq('id', streamId!).single();
-
-            if (error || !streamData) { showToast('Could not load stream.', 'error'); onClose(); return; }
-            if (streamData.status === 'ended') { showToast('This live stream has already ended.', 'info'); onClose(); return; }
-
-            // ── Create peer connection ─────────────────────────────────────────
-            const pc = new RTCPeerConnection(ICE_SERVERS);
-            singlePeerConnectionRef.current = pc;
-
-            // ── Build remote MediaStream BEFORE any tracks arrive ──────────────
-            // Assigning srcObject early means the browser is ready the moment
-            // the first track arrives — no React re-render latency.
-            const remoteMS = new MediaStream();
-            if (remoteVideoRef.current) {
-                remoteVideoRef.current.srcObject = remoteMS;
+            // Check stream still live
+            const { data: streamData } = await supabase
+                .from('live_streams').select('*').eq('id', streamId!).single();
+            if (!streamData || streamData.status === 'ended') {
+                showToast('This stream has already ended.', 'info');
+                onClose();
+                return;
             }
 
-            const playVideo = () => {
-                const vid = remoteVideoRef.current;
-                if (!vid) return;
-                if (vid.srcObject !== remoteMS) vid.srcObject = remoteMS;
-                if (vid.paused) vid.play().catch(() => {});
-            };
+            // Create audience client
+            const client = AgoraRTC.createClient({ mode: 'live', codec: 'h264' });
+            clientRef.current = client;
+            await client.setClientRole('audience', { level: 1 }); // 1 = low latency
 
-            // ── ontrack — add track to remoteMS in-place (no srcObject swap) ──
-            pc.ontrack = (e) => {
-                console.log('[KSU-Live] viewer ontrack:', e.track.kind, e.track.readyState);
-                if (!remoteMS.getTrackById(e.track.id)) remoteMS.addTrack(e.track);
-                (e.streams || []).forEach(s =>
-                    s.getTracks().forEach(t => { if (!remoteMS.getTrackById(t.id)) remoteMS.addTrack(t); })
-                );
-                // Make sure srcObject is still remoteMS (never replaced)
-                const vid = remoteVideoRef.current;
-                if (vid && vid.srcObject !== remoteMS) vid.srcObject = remoteMS;
-                // Use same remoteMS ref for state — only update if first track
-                setRemoteStream(prev => prev ?? remoteMS);
-                setHasStream(true);
-                setLoading(false);
-                playVideo();
-            };
+            // Join channel
+            const uid = Math.floor(Math.random() * 999999);
+            await client.join(AGORA_APP_ID, streamId!, null, uid);
 
-            // ── ICE state tracking + auto-reconnect ───────────────────────────
-            pc.oniceconnectionstatechange = () => {
-                const s = pc.iceConnectionState;
-                console.log('[KSU-Live] ICE state:', s);
-                setIceConnState(s);
-                if (s === 'connected' || s === 'completed') {
+            // ── When host publishes video / audio ─────────────────────────
+            client.on('user-published', async (remoteUser: IAgoraRTCRemoteUser, mediaType: 'video' | 'audio') => {
+                await client.subscribe(remoteUser, mediaType);
+
+                if (mediaType === 'video') {
+                    if (remoteVideoElRef.current) {
+                        remoteUser.videoTrack?.play(remoteVideoElRef.current);
+                    }
+                    setConnected(true);
                     setLoading(false);
-                    setViewerStatus('Connected');
-                    playVideo(); // ensure video plays once ICE is up
                 }
-                if (s === 'failed') {
-                    setViewerStatus('Reconnecting...');
-                    try { pc.restartIce(); } catch {}
-                }
-                if (s === 'disconnected') {
-                    setViewerStatus('Reconnecting...');
-                    setTimeout(() => {
-                        if (singlePeerConnectionRef.current?.iceConnectionState === 'disconnected') {
-                            try { singlePeerConnectionRef.current.restartIce(); } catch {}
-                        }
-                    }, 3000);
-                }
-            };
-            pc.onconnectionstatechange = () => {
-                if (pc.connectionState === 'connected') { setLoading(false); playVideo(); }
-            };
 
-            // ── ICE candidate buffering (before remote description is set) ────
-            let pendingViewerCandidates: RTCIceCandidateInit[] = [];
-            let remoteSet = false;
-            let offerHandled = false; // prevent double-processing
-
-            const processOffer = async (offerPayload: any) => {
-                if (offerHandled) return;
-                offerHandled = true;
-                console.log('[KSU-Live] processing offer');
-                try {
-                    await pc.setRemoteDescription(new RTCSessionDescription(offerPayload));
-                    remoteSet = true;
-
-                    // Flush buffered ICE candidates
-                    for (const c of pendingViewerCandidates) {
-                        try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
-                    }
-                    pendingViewerCandidates = [];
-
-                    const sdpAnswer = await pc.createAnswer();
-                    await pc.setLocalDescription(sdpAnswer);
-
-                    await supabase.from('stream_signals').insert({
-                        stream_id: streamId,
-                        from_user_id: user!.id,
-                        to_user_id: propHostId!,
-                        type: 'answer',
-                        payload: pc.localDescription,
-                    });
-                    console.log('[KSU-Live] answer sent');
-                } catch (err) {
-                    console.error('[KSU-Live] offer processing error:', err);
-                    offerHandled = false; // allow retry
-                }
-            };
-
-            // ── BROADCAST CHANNEL ─────────────────────────────────────────────
-            const bcastChan = supabase.channel(`stream_bcast:${streamId}`);
-            channelRef.current = bcastChan;
-
-            bcastChan.on('broadcast', { event: '*' }, async ({ event, payload }) => {
-                const { targetId, candidate, senderName, senderId: msgSender, text } = payload;
-
-                if (event === 'chat') {
-                    setChatMessages(prev => [...prev, {
-                        id: Math.random().toString(), senderId: msgSender,
-                        senderName, text, timestamp: Date.now()
-                    }]);
-                    return;
-                }
-                if (event === 'stream_ended') {
-                    showToast('The host has ended this live stream.', 'info');
-                    onClose();
-                    return;
-                }
-                // ICE candidates FROM HOST
-                if (event === 'candidate' && targetId === user!.id && candidate) {
-                    if (remoteSet) {
-                        try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
-                    } else {
-                        pendingViewerCandidates.push(candidate);
-                    }
+                if (mediaType === 'audio') {
+                    remoteAudioTrackRef.current = remoteUser.audioTrack;
+                    // Only play if viewer has already tapped unmute
+                    if (!viewerMuted) remoteUser.audioTrack?.play();
                 }
             });
 
-            // Viewer → host ICE candidates
-            pc.onicecandidate = (e) => {
-                if (e.candidate && channelRef.current) {
-                    channelRef.current.send({
-                        type: 'broadcast', event: 'candidate',
-                        payload: { senderId: user!.id, targetId: propHostId!, candidate: e.candidate }
-                    });
-                }
-            };
+            client.on('user-unpublished', (_user: IAgoraRTCRemoteUser, mediaType: 'video' | 'audio') => {
+                if (mediaType === 'video') setConnected(false);
+            });
 
-            bcastChan.subscribe();
-
-            // ── DB SIGNALING — postgres_changes for offer ─────────────────────
-            const sigSub = supabase
-                .channel(`db_signals_viewer_${user!.id}_${streamId}`)
+            // ── Watch for stream end in DB ─────────────────────────────────
+            const endedChan = supabase
+                .channel(`stream_ended_view_${streamId}`)
                 .on('postgres_changes', {
-                    event: 'INSERT', schema: 'public', table: 'stream_signals',
-                    filter: `to_user_id=eq.${user!.id}`,
-                }, async ({ new: signal }: any) => {
-                    if (signal.stream_id !== streamId || signal.type !== 'offer') return;
-                    console.log('[KSU-Live] offer received via postgres_changes');
-                    await processOffer(signal.payload);
-                })
-                .subscribe(async (status) => {
-                    if (status === 'SUBSCRIBED') {
-                        console.log('[KSU-Live] viewer DB channel SUBSCRIBED, sending join');
-                        await supabase.from('stream_signals').insert({
-                            stream_id: streamId,
-                            from_user_id: user!.id,
-                            to_user_id: propHostId!,
-                            type: 'join',
-                            payload: null,
-                        });
-
-                        // ── Polling fallback in case postgres_changes misses the offer ──
-                        // Checks the DB every 1.5 s until offer is received or pc is closed.
-                        const pollOffer = async () => {
-                            if (offerHandled || singlePeerConnectionRef.current !== pc) return;
-                            const { data } = await supabase
-                                .from('stream_signals')
-                                .select('payload')
-                                .eq('to_user_id', user!.id)
-                                .eq('stream_id', streamId!)
-                                .eq('type', 'offer')
-                                .order('created_at', { ascending: false })
-                                .limit(1)
-                                .maybeSingle();
-                            if (data?.payload && !offerHandled) {
-                                console.log('[KSU-Live] offer found via poll');
-                                await processOffer(data.payload);
-                            } else if (!offerHandled) {
-                                setTimeout(pollOffer, 1500);
-                            }
-                        };
-                        // Start polling 2 s after join (give host time to respond)
-                        setTimeout(pollOffer, 2000);
+                    event: 'UPDATE', schema: 'public',
+                    table: 'live_streams', filter: `id=eq.${streamId}`,
+                }, (payload) => {
+                    if ((payload.new as any).status === 'ended') {
+                        showToast('The host has ended this stream.', 'info');
+                        onClose();
                     }
-                });
-
-            // ── Watch for stream ending via DB ────────────────────────────────
-            const endedChannel = supabase.channel(`stream_ended_${streamId}_${user!.id}`)
-                .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'live_streams', filter: `id=eq.${streamId}` },
-                    (payload) => {
-                        if ((payload.new as any).status === 'ended') {
-                            showToast('The host has ended this live stream.', 'info');
-                            onClose();
-                        }
-                    })
+                })
                 .subscribe();
-            streamEndedChannelRef.current = endedChannel;
+            endedChannelRef.current = endedChan;
 
-            // Auto-timeout loading spinner
+            // Setup chat
+            setupChatChannel(streamId!);
+
+            // Fallback timeout to clear spinner
             setTimeout(() => setLoading(false), 15000);
 
         } catch (err: any) {
-            console.error('[KSU-Live] Viewer setup failed:', err);
-            showToast('Failed to connect to stream: ' + (err.message || err), 'error');
+            console.error('[KSU-Live] Viewer join failed:', err);
+            showToast('Failed to join stream: ' + (err.message || err), 'error');
             onClose();
         }
+    };
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  CHAT
+    // ─────────────────────────────────────────────────────────────────────────
+    const setupChatChannel = (sid: string) => {
+        const chan = supabase.channel(`stream_chat:${sid}`);
+        chan.on('broadcast', { event: 'chat' }, ({ payload }: any) => {
+            setChatMessages(prev => [...prev, {
+                id: Math.random().toString(),
+                senderId:   payload.senderId,
+                senderName: payload.senderName,
+                text:       payload.text,
+                timestamp:  Date.now(),
+            }]);
+        }).subscribe();
+        chatChannelRef.current = chan;
     };
 
     const sendChatMessage = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!messageText.trim() || !channelRef.current) return;
-
-        channelRef.current.send({
-            type: 'broadcast',
-            event: 'chat',
+        if (!messageText.trim() || !chatChannelRef.current) return;
+        chatChannelRef.current.send({
+            type: 'broadcast', event: 'chat',
             payload: {
-                senderId: user!.id,
+                senderId:   user!.id,
                 senderName: profile?.username || 'User',
-                text: messageText.trim()
-            }
+                text:       messageText.trim(),
+            },
         });
-
-        const msg: ChatMessage = {
+        setChatMessages(prev => [...prev, {
             id: Math.random().toString(),
-            senderId: user!.id,
+            senderId:   user!.id,
             senderName: profile?.username || 'User',
-            text: messageText.trim(),
-            timestamp: Date.now()
-        };
-        setChatMessages(prev => [...prev, msg]);
+            text:       messageText.trim(),
+            timestamp:  Date.now(),
+        }]);
         setMessageText('');
     };
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  HOST CONTROLS
+    // ─────────────────────────────────────────────────────────────────────────
     const toggleVideo = () => {
-        if (localStream) {
-            const track = localStream.getVideoTracks()[0];
-            if (track) {
-                track.enabled = !videoEnabled;
-                setVideoEnabled(!videoEnabled);
-            }
-        }
+        const track = localVideoTrackRef.current;
+        if (!track) return;
+        track.setEnabled(!videoEnabled);
+        setVideoEnabled(v => !v);
     };
 
     const toggleAudio = () => {
-        if (localStream) {
-            const track = localStream.getAudioTracks()[0];
-            if (track) {
-                track.enabled = !audioEnabled;
-                setAudioEnabled(!audioEnabled);
-            }
-        }
+        const track = localAudioTrackRef.current;
+        if (!track) return;
+        track.setEnabled(!audioEnabled);
+        setAudioEnabled(a => !a);
     };
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  VIEWER: UNMUTE
+    // ─────────────────────────────────────────────────────────────────────────
+    const handleViewerUnmute = () => {
+        setViewerMuted(false);
+        remoteAudioTrackRef.current?.play();
+    };
+
+    const handleViewerMute = () => {
+        setViewerMuted(true);
+        remoteAudioTrackRef.current?.stop();
+    };
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  RENDER
+    // ─────────────────────────────────────────────────────────────────────────
     return (
         <div className="stream-overlay">
-            {/* ---- Main Container ---- */}
             <div className="stream-container">
 
-                {/* ===== VIDEO PANEL ===== */}
+                {/* ═══ VIDEO PANEL ═══════════════════════════════════════════ */}
                 <div className="stream-video-panel">
-                    {/* Top bar: LIVE badge + Close */}
+
+                    {/* Top bar */}
                     <div className="stream-top-bar">
                         <button className="stream-close-btn" onClick={isHost ? stopStreaming : onClose}>
                             <X size={18} />
@@ -697,38 +409,35 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                     {loading && (
                         <div className="stream-loading">
                             <div className="spinner" style={{ width: 40, height: 40, borderWidth: 3 }} />
-                            <p>{isHost ? 'Starting your broadcast...' : 'Connecting to broadcast...'}</p>
+                            <p style={{ marginTop: 14 }}>
+                                {isHost ? 'Starting broadcast…' : 'Joining stream…'}
+                            </p>
                         </div>
                     )}
 
-                    {/* Pre-stream Setup: Camera Preview */}
+                    {/* ── HOST: Setup screen (before going live) ─────────── */}
                     {isHost && !isBroadcasting && (
                         <div className="stream-setup">
-                            {/* Live camera preview fills behind — mirrored like a selfie camera */}
-                            <video
-                                ref={previewVideoRef}
-                                autoPlay
-                                playsInline
-                                muted
-                                className="stream-preview-video"
+                            {/* Live camera preview */}
+                            <div
+                                ref={previewVideoElRef}
                                 style={{
+                                    position: 'absolute', inset: 0,
                                     display: cameraReady ? 'block' : 'none',
-                                    transform: 'scaleX(-1)',  /* mirror so host sees themselves naturally */
+                                    transform: 'scaleX(-1)',
+                                    background: '#000',
                                 }}
                             />
 
-                            {/* Dark gradient overlay at bottom for controls */}
                             <div className="stream-setup-overlay">
-                                {previewLoading && (
-                                    <div className="stream-cam-status">
-                                        <div className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />
-                                        <span>Accessing camera...</span>
+                                {cameraReady ? (
+                                    <div className="stream-cam-ready">
+                                        <span className="stream-cam-dot" />
+                                        <span>Camera Ready</span>
                                     </div>
-                                )}
-
-                                {!cameraReady && !previewLoading && (
+                                ) : (
                                     <div style={{ textAlign: 'center' }}>
-                                        <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'linear-gradient(135deg, #a78bfa, #7c3aed)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 10px' }}>
+                                        <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'linear-gradient(135deg,#a78bfa,#7c3aed)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 10px' }}>
                                             <Radio size={24} color="white" />
                                         </div>
                                         <p style={{ color: 'rgba(255,255,255,0.75)', fontSize: '0.82rem', marginBottom: 10 }}>
@@ -740,17 +449,9 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                                     </div>
                                 )}
 
-                                {cameraReady && (
-                                    <div className="stream-cam-ready">
-                                        <span className="stream-cam-dot" />
-                                        <span>Camera Ready</span>
-                                    </div>
-                                )}
-
-                                {/* Title input */}
                                 <input
                                     className="stream-title-input"
-                                    placeholder="Enter stream title..."
+                                    placeholder="Enter stream title…"
                                     value={title}
                                     onChange={e => setTitle(e.target.value)}
                                     maxLength={80}
@@ -758,13 +459,13 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
 
                                 <div className="stream-info-hint">
                                     <Info size={11} />
-                                    <span>Followers can join from their feed</span>
+                                    <span>Powered by Agora — viewers see & hear you in real time</span>
                                 </div>
 
                                 <button
                                     className="stream-go-live-btn"
                                     onClick={startStreaming}
-                                    disabled={!title.trim()}
+                                    disabled={!title.trim() || loading}
                                 >
                                     <Radio size={15} /> Go Live Now
                                 </button>
@@ -772,88 +473,65 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                         </div>
                     )}
 
-                    {/* Host broadcasting video — mirrored for natural selfie feel */}
+                    {/* ── HOST: Broadcasting view ─────────────────────────── */}
                     {isHost && isBroadcasting && (
-                        <video
-                            ref={localVideoRef}
-                            autoPlay
-                            playsInline
-                            muted
-                            className="stream-live-video"
-                            style={{ transform: 'scaleX(-1)' }}
+                        <div
+                            ref={localVideoElRef}
+                            style={{
+                                position: 'absolute', inset: 0,
+                                background: '#000',
+                                transform: 'scaleX(-1)', // mirror selfie
+                            }}
                         />
                     )}
 
-                    {/* Viewer remote video */}
+                    {/* ── VIEWER: Remote stream ───────────────────────────── */}
                     {!isHost && streamId && (
                         <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-                            {/* Video always renders; starts muted for autoplay policy */}
-                            <video
-                                ref={remoteVideoRef}
-                                autoPlay
-                                playsInline
-                                muted          /* static attr — controlled via ref in useEffect */
-                                className="stream-live-video"
+                            {/* Agora renders video here */}
+                            <div
+                                ref={remoteVideoElRef}
+                                style={{ position: 'absolute', inset: 0, background: '#000' }}
                             />
 
-                            {/* ── Connecting overlay (before first track) ── */}
-                            {!hasStream && (
-                                <div className="stream-loading" style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)' }}>
-                                    {iceConnState === 'failed' ? (
-                                        <>
-                                            <span style={{ fontSize: '2.5rem', marginBottom: 12 }}>⚠️</span>
-                                            <p style={{ marginBottom: 16, textAlign: 'center' }}>Connection failed</p>
-                                            <button
-                                                onClick={() => { setHasStream(false); setLoading(true); startViewing(); }}
-                                                style={{
-                                                    background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)',
-                                                    borderRadius: 99, padding: '10px 24px', color: 'white',
-                                                    cursor: 'pointer', fontWeight: 700, fontSize: '0.875rem',
-                                                }}
-                                            >🔄 Retry Connection</button>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <div className="spinner" style={{ width: 40, height: 40, borderWidth: 3, marginBottom: 14 }} />
-                                            <p style={{ opacity: 0.85 }}>Connecting to live stream…</p>
-                                            <p style={{ fontSize: '0.75rem', opacity: 0.5, marginTop: 6 }}>{viewerStatus}</p>
-                                        </>
-                                    )}
+                            {/* Connecting overlay */}
+                            {!connected && !loading && (
+                                <div className="stream-loading" style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}>
+                                    <div className="spinner" style={{ width: 40, height: 40, borderWidth: 3, marginBottom: 14 }} />
+                                    <p style={{ opacity: 0.9 }}>Waiting for host to start…</p>
+                                    <p style={{ fontSize: '0.75rem', opacity: 0.5, marginTop: 6 }}>
+                                        Powered by Agora
+                                    </p>
                                 </div>
                             )}
 
-                            {/* ── Audio controls (shown as soon as watching) ── */}
+                            {/* Audio controls — always visible */}
                             <div style={{
                                 position: 'absolute', bottom: 70, left: '50%',
                                 transform: 'translateX(-50%)',
                                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
-                                zIndex: 10, pointerEvents: 'auto',
+                                zIndex: 10,
                             }}>
-                                {/* Big unmute button (pulsing until tapped) */}
-                                {viewerMuted && (
+                                {viewerMuted ? (
                                     <div
-                                        onClick={() => setViewerMuted(false)}
+                                        onClick={handleViewerUnmute}
                                         style={{
-                                            background: 'rgba(0,0,0,0.82)',
+                                            background: 'rgba(0,0,0,0.85)',
                                             borderRadius: 99, padding: '14px 30px',
                                             display: 'flex', alignItems: 'center', gap: 10,
                                             cursor: 'pointer', color: 'white',
                                             fontSize: '1rem', fontWeight: 800,
-                                            border: '2px solid rgba(255,255,255,0.4)',
+                                            border: '2px solid rgba(255,255,255,0.45)',
                                             backdropFilter: 'blur(12px)',
                                             boxShadow: '0 4px 32px rgba(0,0,0,0.7)',
                                             animation: 'pulse 2s infinite',
                                             whiteSpace: 'nowrap',
-                                            letterSpacing: '0.02em',
                                         }}
                                     >
                                         <Volume2 size={20} />
                                         🔇 Tap to hear audio
                                     </div>
-                                )}
-
-                                {/* Volume slider once unmuted */}
-                                {!viewerMuted && (
+                                ) : (
                                     <div style={{
                                         display: 'flex', alignItems: 'center', gap: 10,
                                         background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(10px)',
@@ -861,14 +539,9 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                                         border: '1px solid rgba(255,255,255,0.2)',
                                     }}>
                                         <Volume2 size={16} color="white" />
-                                        <input
-                                            type="range" min={0} max={1} step={0.05}
-                                            value={viewerVolume}
-                                            onChange={e => setViewerVolume(Number(e.target.value))}
-                                            style={{ width: 100, accentColor: '#a78bfa', cursor: 'pointer' }}
-                                        />
+                                        <span style={{ color: 'white', fontSize: '0.8rem', fontWeight: 600 }}>🔊 Audio on</span>
                                         <button
-                                            onClick={() => setViewerMuted(true)}
+                                            onClick={handleViewerMute}
                                             style={{
                                                 background: 'transparent', border: 'none',
                                                 color: 'rgba(255,255,255,0.6)', cursor: 'pointer',
@@ -881,7 +554,7 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                         </div>
                     )}
 
-                    {/* Host controls while broadcasting */}
+                    {/* ── HOST controls while broadcasting ───────────────── */}
                     {isHost && isBroadcasting && (
                         <div className="stream-controls">
                             <button
@@ -898,14 +571,12 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                             >
                                 {audioEnabled ? <Mic size={18} /> : <MicOff size={18} />}
                             </button>
-                            <button onClick={stopStreaming} className="stream-end-btn">
-                                End
-                            </button>
+                            <button onClick={stopStreaming} className="stream-end-btn">End</button>
                         </div>
                     )}
                 </div>
 
-                {/* ===== CHAT PANEL ===== */}
+                {/* ═══ CHAT PANEL ════════════════════════════════════════════ */}
                 <div className={`stream-chat-panel ${chatOpen ? 'chat-open' : ''}`}>
                     <div className="stream-chat-header" onClick={() => setChatOpen(!chatOpen)} style={{ cursor: 'pointer' }}>
                         <Radio size={14} style={{ color: '#a78bfa' }} />
@@ -921,9 +592,7 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                     <div className="stream-chat-messages">
                         {chatMessages.map(msg => (
                             <div key={msg.id} className="stream-chat-msg">
-                                <span className="stream-chat-name" style={{
-                                    color: msg.senderId === propHostId || (isHost && msg.senderId === user!.id) ? '#a78bfa' : '#06b6d4'
-                                }}>
+                                <span className="stream-chat-name" style={{ color: '#06b6d4' }}>
                                     @{msg.senderName}
                                 </span>
                                 <span className="stream-chat-text">{msg.text}</span>
@@ -938,20 +607,16 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                     <form onSubmit={sendChatMessage} className="stream-chat-form">
                         <input
                             className="stream-chat-input"
-                            placeholder="Send a message..."
+                            placeholder="Send a message…"
                             value={messageText}
                             onChange={e => setMessageText(e.target.value)}
-                            disabled={!isBroadcasting && isHost}
                         />
-                        <button
-                            type="submit"
-                            className="stream-chat-send"
-                            disabled={(!isBroadcasting && isHost) || !messageText.trim()}
-                        >
+                        <button type="submit" className="stream-chat-send" disabled={!messageText.trim()}>
                             <Send size={15} />
                         </button>
                     </form>
                 </div>
+
             </div>
         </div>
     );
