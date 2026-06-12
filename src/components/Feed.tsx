@@ -117,14 +117,30 @@ export default function Feed({ setActivePage, onStartLive, onWatchLive }: {
     let postType: 'text' | 'image' | 'video' = 'text';
 
     if (mediaFile) {
-      const ext = mediaFile.name.split('.').pop();
+      const ext = mediaFile.name.split('.').pop()?.toLowerCase();
+      const isVideo = mediaFile.type.startsWith('video');
+
+      // Warn if file is too large (Supabase free plan has a 50MB object limit)
+      if (mediaFile.size > 50 * 1024 * 1024) {
+        showToast('File too large! Max 50MB allowed.', 'error');
+        setPosting(false);
+        return;
+      }
+
+      if (isVideo) showToast('Uploading video... please wait ⏳', 'info');
+
       const path = `${user.id}/${Date.now()}.${ext}`;
-      const { error: upErr } = await supabase.storage.from('posts').upload(path, mediaFile);
+      const { error: upErr } = await supabase.storage
+        .from('posts')
+        .upload(path, mediaFile, {
+          contentType: mediaFile.type,
+          upsert: false,
+        });
 
       if (upErr) { showToast('Media upload failed: ' + upErr.message, 'error'); setPosting(false); return; }
       const { data: urlData } = supabase.storage.from('posts').getPublicUrl(path);
       mediaUrls = [urlData.publicUrl];
-      postType = mediaFile.type.startsWith('video') ? 'video' : 'image';
+      postType = isVideo ? 'video' : 'image';
     }
 
     const { error } = await supabase.from('posts').insert({
@@ -347,9 +363,10 @@ export default function Feed({ setActivePage, onStartLive, onWatchLive }: {
           )}
 
           <div className="create-post-tools">
+            {/* Single hidden input for both photo and video */}
             <input ref={fileRef} type="file" accept="image/*,video/*" style={{ display: 'none' }} onChange={handleMedia} />
-            <button className="btn btn-ghost btn-sm" onClick={() => fileRef.current?.click()} title="Add image/video">
-              <Image size={16} color="var(--neon-blue)" /> Photo
+            <button className="btn btn-ghost btn-sm" onClick={() => fileRef.current?.click()} title="Add photo or video (max 50MB)">
+              <Image size={16} color="var(--neon-blue)" /> Photo / Video
             </button>
             <button className="btn btn-ghost btn-sm" onClick={() => setShowLocation(!showLocation)} title="Add location">
               <MapPin size={16} color="var(--coral)" />

@@ -340,6 +340,12 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
             const pc = new RTCPeerConnection(ICE_SERVERS);
             singlePeerConnectionRef.current = pc;
 
+            // *** CRITICAL FIX: Tell WebRTC we want to RECEIVE video+audio ***
+            // Without this, setRemoteDescription ignores incoming media tracks
+            // because the peer connection has no transceivers configured.
+            pc.addTransceiver('video', { direction: 'recvonly' });
+            pc.addTransceiver('audio', { direction: 'recvonly' });
+
             // Buffer of ICE candidates that arrive before offer
             let pendingViewerCandidates: RTCIceCandidateInit[] = [];
             let remoteSet = false;
@@ -675,6 +681,12 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                                 ref={remoteVideoRef}
                                 autoPlay
                                 playsInline
+                                muted={false}
+                                onCanPlay={(e) => {
+                                    // Force play when media is ready — handles browsers that ignore autoPlay
+                                    const v = e.currentTarget;
+                                    if (v.paused) v.play().catch(() => setAutoPlayBlocked(true));
+                                }}
                                 className="stream-live-video"
                             />
                             {/* Tap-to-play overlay (iOS/some Android block autoplay) */}

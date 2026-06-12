@@ -189,7 +189,17 @@ export default function PostCard({ post, onDelete, setActivePage }: PostCardProp
       {post.media_urls?.length > 0 && (
         <div style={{ overflow: 'hidden' }}>
           {post.post_type === 'video'
-            ? <video src={post.media_urls[0]} controls className="post-media" style={{ maxHeight: 400 }} />
+            ? (
+              <video
+                src={post.media_urls[0]}
+                controls
+                playsInline
+                preload="metadata"
+                className="post-media"
+                style={{ maxHeight: 400, width: '100%', background: '#000' }}
+                onError={(e) => { (e.target as HTMLVideoElement).style.display = 'none'; }}
+              />
+            )
             : <img src={post.media_urls[0]} alt="post" className="post-media"
               style={{ maxHeight: 500 }}
               onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />}
