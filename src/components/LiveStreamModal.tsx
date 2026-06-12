@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import AgoraRTC, {
+import AgoraRTC from 'agora-rtc-sdk-ng';
+import type {
     IAgoraRTCClient,
     ICameraVideoTrack,
     IMicrophoneAudioTrack,
