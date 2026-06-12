@@ -81,10 +81,12 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
     const [messageText, setMessageText] = useState('');
     const [chatOpen, setChatOpen] = useState(false);
-    // Viewer video starts muted — browsers block unmuted autoplay; user taps to enable audio
-    const [viewerMuted, setViewerMuted] = useState(true);
-    const [iceConnState, setIceConnState] = useState('');
-    const [viewerStatus, setViewerStatus] = useState('Connecting...');
+    // Viewer audio state
+    const [viewerMuted, setViewerMuted]     = useState(true);
+    const [viewerVolume, setViewerVolume]   = useState(1);
+    const [hasStream,   setHasStream]       = useState(false); // true once first track arrives
+    const [iceConnState, setIceConnState]   = useState('');
+    const [viewerStatus, setViewerStatus]   = useState('Connecting...');
 
     // Refs for video components
     const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -131,12 +133,25 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
         }
     }, [previewStream]);
 
-    // Attach remote stream to video element; muted videos always autoplay
+    // Sync viewerMuted → video.muted via ref (React muted prop is unreliable)
+    useEffect(() => {
+        const vid = remoteVideoRef.current;
+        if (!vid) return;
+        vid.muted = viewerMuted;
+        if (!viewerMuted) vid.play().catch(() => {});
+    }, [viewerMuted]);
+
+    // Sync volume
+    useEffect(() => {
+        const vid = remoteVideoRef.current;
+        if (vid) vid.volume = viewerVolume;
+    }, [viewerVolume]);
+
+    // Keep remote stream attached whenever it changes
     useEffect(() => {
         if (!remoteStream || !remoteVideoRef.current) return;
         const video = remoteVideoRef.current;
-        if (video.srcObject === remoteStream) return; // already attached
-        video.srcObject = remoteStream;
+        if (video.srcObject !== remoteStream) video.srcObject = remoteStream;
         video.play().catch(() => {});
     }, [remoteStream]);
 
@@ -405,24 +420,21 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                 if (vid.paused) vid.play().catch(() => {});
             };
 
-            // ── ontrack — add e.track directly to remoteMS ────────────────────
-            // Do NOT rely on e.streams[0]: it is undefined in some browsers.
+            // ── ontrack — add track to remoteMS in-place (no srcObject swap) ──
             pc.ontrack = (e) => {
                 console.log('[KSU-Live] viewer ontrack:', e.track.kind, e.track.readyState);
-                // Add this track (idempotent)
-                if (!remoteMS.getTrackById(e.track.id)) {
-                    remoteMS.addTrack(e.track);
-                }
-                // Absorb any additional tracks from e.streams (redundancy)
+                if (!remoteMS.getTrackById(e.track.id)) remoteMS.addTrack(e.track);
                 (e.streams || []).forEach(s =>
-                    s.getTracks().forEach(t => {
-                        if (!remoteMS.getTrackById(t.id)) remoteMS.addTrack(t);
-                    })
+                    s.getTracks().forEach(t => { if (!remoteMS.getTrackById(t.id)) remoteMS.addTrack(t); })
                 );
-                playVideo();
-                // New MediaStream object → triggers React re-render (shows unmute button)
-                setRemoteStream(new MediaStream(remoteMS.getTracks()));
+                // Make sure srcObject is still remoteMS (never replaced)
+                const vid = remoteVideoRef.current;
+                if (vid && vid.srcObject !== remoteMS) vid.srcObject = remoteMS;
+                // Use same remoteMS ref for state — only update if first track
+                setRemoteStream(prev => prev ?? remoteMS);
+                setHasStream(true);
                 setLoading(false);
+                playVideo();
             };
 
             // ── ICE state tracking + auto-reconnect ───────────────────────────
@@ -775,64 +787,97 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                     {/* Viewer remote video */}
                     {!isHost && streamId && (
                         <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-                            {/* autoPlay + playsInline + muted=true → guaranteed to autoplay on all browsers */}
+                            {/* Video always renders; starts muted for autoplay policy */}
                             <video
                                 ref={remoteVideoRef}
                                 autoPlay
                                 playsInline
-                                muted={viewerMuted}
+                                muted          /* static attr — controlled via ref in useEffect */
                                 className="stream-live-video"
                             />
 
-                            {/* ── Unmute button ──────────────────────────────────────────
-                                Shown once ICE connects OR once tracks arrive.
-                                Must be a user-gesture to unmute per browser autoplay policy. */}
-                            {viewerMuted && (remoteStream || iceConnState === 'connected' || iceConnState === 'completed') && (
-                                <div
-                                    style={{
-                                        position: 'absolute', bottom: 76, left: '50%',
-                                        transform: 'translateX(-50%)',
-                                        background: 'rgba(0,0,0,0.82)',
-                                        borderRadius: 99, padding: '12px 28px',
-                                        display: 'flex', alignItems: 'center', gap: 10,
-                                        cursor: 'pointer', color: 'white',
-                                        fontSize: '0.9rem', fontWeight: 700,
-                                        border: '1px solid rgba(255,255,255,0.25)',
-                                        backdropFilter: 'blur(12px)', zIndex: 10,
-                                        whiteSpace: 'nowrap',
-                                        boxShadow: '0 4px 24px rgba(0,0,0,0.6)',
-                                        animation: 'pulse 2s infinite',
-                                    }}
-                                    onClick={() => {
-                                        setViewerMuted(false);
-                                        const vid = remoteVideoRef.current;
-                                        if (vid) {
-                                            vid.muted = false;
-                                            vid.play().catch(() => {});
-                                        }
-                                    }}
-                                >
-                                    <Volume2 size={18} />
-                                    Tap to enable audio
-                                </div>
-                            )}
-
-                            {/* Waiting / connection-failed state */}
-                            {!remoteStream && !loading && (
-                                <div className="stream-loading" style={{ background: 'transparent' }}>
+                            {/* ── Connecting overlay (before first track) ── */}
+                            {!hasStream && (
+                                <div className="stream-loading" style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)' }}>
                                     {iceConnState === 'failed' ? (
                                         <>
-                                            <span style={{ fontSize: '2.2rem' }}>⚠️</span>
-                                            <p style={{ marginTop: 10 }}>Connection failed — retrying…</p>
+                                            <span style={{ fontSize: '2.5rem', marginBottom: 12 }}>⚠️</span>
+                                            <p style={{ marginBottom: 16, textAlign: 'center' }}>Connection failed</p>
+                                            <button
+                                                onClick={() => { setHasStream(false); setLoading(true); startViewing(); }}
+                                                style={{
+                                                    background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)',
+                                                    borderRadius: 99, padding: '10px 24px', color: 'white',
+                                                    cursor: 'pointer', fontWeight: 700, fontSize: '0.875rem',
+                                                }}
+                                            >🔄 Retry Connection</button>
                                         </>
                                     ) : (
                                         <>
-                                            <div className="spinner" style={{ width: 36, height: 36, borderWidth: 2.5 }} />
-                                            <p style={{ marginTop: 12 }}>Connecting to stream…</p>
+                                            <div className="spinner" style={{ width: 40, height: 40, borderWidth: 3, marginBottom: 14 }} />
+                                            <p style={{ opacity: 0.85 }}>Connecting to live stream…</p>
+                                            <p style={{ fontSize: '0.75rem', opacity: 0.5, marginTop: 6 }}>{viewerStatus}</p>
                                         </>
                                     )}
                                 </div>
                             )}
+
+                            {/* ── Audio controls (shown as soon as watching) ── */}
+                            <div style={{
+                                position: 'absolute', bottom: 70, left: '50%',
+                                transform: 'translateX(-50%)',
+                                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
+                                zIndex: 10, pointerEvents: 'auto',
+                            }}>
+                                {/* Big unmute button (pulsing until tapped) */}
+                                {viewerMuted && (
+                                    <div
+                                        onClick={() => setViewerMuted(false)}
+                                        style={{
+                                            background: 'rgba(0,0,0,0.82)',
+                                            borderRadius: 99, padding: '14px 30px',
+                                            display: 'flex', alignItems: 'center', gap: 10,
+                                            cursor: 'pointer', color: 'white',
+                                            fontSize: '1rem', fontWeight: 800,
+                                            border: '2px solid rgba(255,255,255,0.4)',
+                                            backdropFilter: 'blur(12px)',
+                                            boxShadow: '0 4px 32px rgba(0,0,0,0.7)',
+                                            animation: 'pulse 2s infinite',
+                                            whiteSpace: 'nowrap',
+                                            letterSpacing: '0.02em',
+                                        }}
+                                    >
+                                        <Volume2 size={20} />
+                                        🔇 Tap to hear audio
+                                    </div>
+                                )}
+
+                                {/* Volume slider once unmuted */}
+                                {!viewerMuted && (
+                                    <div style={{
+                                        display: 'flex', alignItems: 'center', gap: 10,
+                                        background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(10px)',
+                                        borderRadius: 99, padding: '8px 18px',
+                                        border: '1px solid rgba(255,255,255,0.2)',
+                                    }}>
+                                        <Volume2 size={16} color="white" />
+                                        <input
+                                            type="range" min={0} max={1} step={0.05}
+                                            value={viewerVolume}
+                                            onChange={e => setViewerVolume(Number(e.target.value))}
+                                            style={{ width: 100, accentColor: '#a78bfa', cursor: 'pointer' }}
+                                        />
+                                        <button
+                                            onClick={() => setViewerMuted(true)}
+                                            style={{
+                                                background: 'transparent', border: 'none',
+                                                color: 'rgba(255,255,255,0.6)', cursor: 'pointer',
+                                                fontSize: '0.7rem', fontWeight: 600,
+                                            }}
+                                        >Mute</button>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     )}
 
