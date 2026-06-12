@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 
 
-type Section = 'main' | 'appearance' | 'notifications' | 'privacy' | 'content' | 'account' | 'about';
+type Section = 'main' | 'appearance' | 'notifications' | 'privacy' | 'content' | 'account' | 'about' | 'policy';
 
 export default function SettingsPage() {
     const { user, profile, signOut, refreshProfile } = useAuth();
@@ -72,6 +72,12 @@ export default function SettingsPage() {
                 title="Account"
                 subtitle="Email, password, delete"
                 onClick={() => setSection('account')}
+            />
+            <SectionItem
+                icon={FileText}
+                title="Community Policy"
+                subtitle="Rules, guidelines & what's not allowed"
+                onClick={() => setSection('policy')}
             />
             <SectionItem
                 icon={HelpCircle}
@@ -330,10 +336,21 @@ export default function SettingsPage() {
                     onChange={v => update('language', v)}
                     options={[
                         { value: 'en', label: '🇬🇧 English' },
-                        { value: 'pcm', label: '🇳🇬 Pidgin' },
-                        { value: 'yo', label: '🇳🇬 Yoruba' },
+                        { value: 'pcm', label: '🇳🇬 Nigerian Pidgin' },
+                        { value: 'yo', label: '🇳🇬 Yorùbá' },
                         { value: 'ig', label: '🇳🇬 Igbo' },
                         { value: 'ha', label: '🇳🇬 Hausa' },
+                        { value: 'fr', label: '🇫🇷 Français (French)' },
+                        { value: 'ar', label: '🇸🇦 العربية (Arabic)' },
+                        { value: 'es', label: '🇪🇸 Español (Spanish)' },
+                        { value: 'pt', label: '🇧🇷 Português (Portuguese)' },
+                        { value: 'sw', label: '🇰🇪 Kiswahili (Swahili)' },
+                        { value: 'zh', label: '🇨🇳 中文 (Chinese)' },
+                        { value: 'de', label: '🇩🇪 Deutsch (German)' },
+                        { value: 'it', label: '🇮🇹 Italiano (Italian)' },
+                        { value: 'ja', label: '🇯🇵 日本語 (Japanese)' },
+                        { value: 'ko', label: '🇰🇷 한국어 (Korean)' },
+                        { value: 'ru', label: '🇷🇺 Русский (Russian)' },
                     ]}
                 />
             </SettingGroup>
@@ -415,6 +432,7 @@ export default function SettingsPage() {
             <SettingGroup>
                 <RowItem icon={FileText} title="Terms of Service" onClick={() => showToast('Visit ksuconnect.app/terms', 'info')} />
                 <RowItem icon={Shield} title="Privacy Policy" onClick={() => showToast('Visit ksuconnect.app/privacy', 'info')} />
+                <RowItem icon={FileText} title="Community Guidelines" subtitle="What's allowed and what's not" onClick={() => setSection('policy')} />
                 <RowItem icon={HelpCircle} title="Help Center" onClick={() => showToast('Email: support@ksuconnect.app', 'info')} />
                 <RowItem icon={Mail} title="Contact us" subtitle="support@ksuconnect.app" onClick={() => showToast('support@ksuconnect.app', 'info')} />
             </SettingGroup>
@@ -422,6 +440,81 @@ export default function SettingsPage() {
             <p style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.75rem', padding: 16 }}>
                 Made with ❤️ for KSU students
             </p>
+        </div>
+    );
+
+    const renderPolicy = () => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <BackHeader title="Community Policy" onBack={() => setSection('main')} />
+
+            <div className="glass-card" style={{ padding: 20, background: 'linear-gradient(135deg, rgba(239,68,68,0.08), rgba(139,92,246,0.08))' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 12, background: 'linear-gradient(135deg, #ef4444, #a855f7)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Shield size={20} color="white" />
+                    </div>
+                    <div>
+                        <div style={{ fontWeight: 700, fontSize: '1rem' }}>KSU Connect Community Guidelines</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Effective: June 2026 · Version 1.0</div>
+                    </div>
+                </div>
+                <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                    KSU Connect is a safe and respectful campus community. By using this platform, you agree to follow these guidelines.
+                    Violations may result in post removal, account suspension, or permanent ban.
+                </p>
+            </div>
+
+            {([
+                {
+                    title: '🚫 No Hate Speech or Discrimination',
+                    body: 'Content that promotes hatred, discrimination, or violence against any individual or group based on race, ethnicity, religion, gender, sexual orientation, disability, or nationality is strictly prohibited. This includes slurs, dehumanizing language, and discriminatory imagery.'
+                },
+                {
+                    title: '🔞 No Sexual or Explicit Content',
+                    body: 'Posting, sharing, or requesting sexually explicit content, nudity, or sexual solicitation of any kind is not allowed. This is a campus platform accessible to students of all ages. Any such content will be immediately removed and the account suspended.'
+                },
+                {
+                    title: '🛡️ No Harassment or Bullying',
+                    body: 'Do not target, threaten, intimidate, or bully other users. This includes repeated unwanted messages, sharing private information (doxxing), and coordinated attacks on individuals. Respectful disagreement is fine — personal attacks are not.'
+                },
+                {
+                    title: '🎭 No Impersonation or Fake Accounts',
+                    body: 'Do not create accounts pretending to be another person, student, lecturer, or organization. Using misleading profile photos, names, or descriptions to deceive others is a violation and may lead to immediate permanent ban.'
+                },
+                {
+                    title: '📢 No Spam or Misleading Content',
+                    body: 'Posting repetitive content, unsolicited promotions, chain messages, misleading clickbait, or coordinated inauthentic behavior (fake engagement) is not allowed. Posts must be genuine and add value to the community.'
+                },
+                {
+                    title: '🔒 Respect Privacy',
+                    body: 'Never share someone else\'s private information without their consent — this includes phone numbers, home addresses, personal photos, financial details, or private conversations. Always get consent before tagging people or sharing their content.'
+                },
+                {
+                    title: '⚠️ No Dangerous or Illegal Content',
+                    body: 'Content that promotes or facilitates illegal activities including drug use, weapon possession, academic fraud/exam malpractice, piracy, or any criminal activity is strictly forbidden on this platform.'
+                },
+                {
+                    title: '📚 Academic Integrity',
+                    body: 'KSU Connect does not condone academic dishonesty. Do not use this platform to request, share, or sell exam questions, answer sheets, or to coordinate cheating. Such actions violate both these guidelines and university policy.'
+                },
+                {
+                    title: '🎥 Live Stream Rules',
+                    body: 'Live streams must comply with all community guidelines. You may not stream adult content, hate speech, dangerous activities, or content that violates anyone\'s privacy. Hosts are responsible for the content of their streams at all times.'
+                },
+                {
+                    title: '✅ How to Report Violations',
+                    body: 'If you see content that violates these guidelines, use the report button on the post or profile. Our moderation team reviews all reports. You can also email: support@ksuconnect.app. We take all reports seriously and respond within 24 hours.'
+                },
+            ] as { title: string; body: string }[]).map((item, i) => (
+                <div key={i} className="glass-card" style={{ padding: 16 }}>
+                    <div style={{ fontWeight: 700, fontSize: '0.92rem', marginBottom: 6 }}>{item.title}</div>
+                    <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.65, margin: 0 }}>{item.body}</p>
+                </div>
+            ))}
+
+            <div style={{ textAlign: 'center', padding: 16, color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                By continuing to use KSU Connect, you agree to abide by these Community Guidelines.
+                <br />For questions: <span style={{ color: 'var(--text-accent)' }}>support@ksuconnect.app</span>
+            </div>
         </div>
     );
 
@@ -443,6 +536,7 @@ export default function SettingsPage() {
             {section === 'privacy' && renderPrivacy()}
             {section === 'content' && renderContent()}
             {section === 'account' && renderAccount()}
+            {section === 'policy' && renderPolicy()}
             {section === 'about' && renderAbout()}
         </div>
     );

@@ -1765,4 +1765,12 @@ textarea.input {
   .modal input {
     padding: 10px 14px !important;
   }
+
+  /* Live stream modal — stack vertically on mobile */
+  .live-stream-modal-grid {
+    grid-template-columns: 1fr !important;
+    grid-template-rows: 55vh 1fr;
+    height: 90vh !important;
+    max-height: 90vh !important;
+  }
 }

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { X, Video, VideoOff, Mic, MicOff, Send, Users, Radio } from 'lucide-react';
+import { X, Video, VideoOff, Mic, MicOff, Send, Users, Radio, Eye, Info } from 'lucide-react';
 
 interface LiveStreamModalProps {
     streamId?: string;
@@ -24,6 +24,7 @@ const ICE_SERVERS = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
     ]
 };
 
@@ -44,6 +45,11 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
     const [audioEnabled, setAudioEnabled] = useState(true);
     const [loading, setLoading] = useState(!isHost);
 
+    // Camera preview before going live
+    const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
+    const [previewLoading, setPreviewLoading] = useState(false);
+    const [cameraReady, setCameraReady] = useState(false);
+
     // Chat states
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
     const [messageText, setMessageText] = useState('');
@@ -51,12 +57,13 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
     // Refs for video components
     const localVideoRef = useRef<HTMLVideoElement>(null);
     const remoteVideoRef = useRef<HTMLVideoElement>(null);
+    const previewVideoRef = useRef<HTMLVideoElement>(null);
     const chatEndRef = useRef<HTMLDivElement>(null);
 
     // WebRTC Signaling Refs
     const channelRef = useRef<any>(null);
-    const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map()); // viewerId -> PC (For Host)
-    const singlePeerConnectionRef = useRef<RTCPeerConnection | null>(null); // For Viewer
+    const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+    const singlePeerConnectionRef = useRef<RTCPeerConnection | null>(null);
     const localStreamRef = useRef<MediaStream | null>(null);
 
     // Auto-scroll chat
@@ -64,29 +71,56 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [chatMessages]);
 
-    // Cleanup function when component unmounts
+    // Start camera preview when host opens modal
     useEffect(() => {
+        if (isHost && !isBroadcasting) {
+            startCameraPreview();
+        }
         return () => {
             cleanupConnections();
         };
     }, []);
 
+    // Attach preview stream to video element
+    useEffect(() => {
+        if (previewStream && previewVideoRef.current) {
+            previewVideoRef.current.srcObject = previewStream;
+        }
+    }, [previewStream]);
+
+    const startCameraPreview = async () => {
+        setPreviewLoading(true);
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { width: 640, height: 480, frameRate: 15, facingMode: 'user' },
+                audio: true
+            });
+            setPreviewStream(stream);
+            setCameraReady(true);
+        } catch (err: any) {
+            showToast('Camera access denied. Please allow camera/mic permissions.', 'error');
+        } finally {
+            setPreviewLoading(false);
+        }
+    };
+
     const cleanupConnections = async () => {
+        // Stop preview stream tracks
+        if (previewStream) {
+            previewStream.getTracks().forEach(t => t.stop());
+        }
         // Stop camera tracks
         if (localStreamRef.current) {
             localStreamRef.current.getTracks().forEach(t => t.stop());
         }
-
         // Close host connections
         peerConnectionsRef.current.forEach(pc => pc.close());
         peerConnectionsRef.current.clear();
-
         // Close viewer connection
         if (singlePeerConnectionRef.current) {
             singlePeerConnectionRef.current.close();
             singlePeerConnectionRef.current = null;
         }
-
         // Unsubscribe signaling channel
         if (channelRef.current) {
             supabase.removeChannel(channelRef.current);
@@ -102,16 +136,20 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
         setLoading(true);
 
         try {
-            // 1. Get User Media
-            const media = await navigator.mediaDevices.getUserMedia({
-                video: { width: 640, height: 480, frameRate: 15 },
-                audio: true
-            });
+            // Use the preview stream if available (so camera is already running)
+            let media: MediaStream;
+            if (previewStream && previewStream.active) {
+                media = previewStream;
+                setPreviewStream(null); // Transfer ownership
+            } else {
+                media = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 640, height: 480, frameRate: 15, facingMode: 'user' },
+                    audio: true
+                });
+            }
+
             setLocalStream(media);
             localStreamRef.current = media;
-            if (localVideoRef.current) {
-                localVideoRef.current.srcObject = media;
-            }
 
             // 2. Insert live_streams record in DB
             const { data: stream, error: sErr } = await supabase.from('live_streams').insert({
@@ -124,17 +162,28 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
             setStreamId(stream.id);
             setIsBroadcasting(true);
 
+            // Attach to video element
+            if (localVideoRef.current) {
+                localVideoRef.current.srcObject = media;
+            }
+
             // 3. Initialize signaling channel
             setupHostSignaling(stream.id, media);
-            showToast('Live broadcast started! 🎥', 'success');
+            showToast('🎥 You are now LIVE! Followers can join from their feed.', 'success');
         } catch (err: any) {
             console.error('Failed to start stream', err);
             showToast('Could not access camera/mic: ' + (err.message || err), 'error');
-            onClose();
         } finally {
             setLoading(false);
         }
     };
+
+    // Attach local stream to video element once both are ready
+    useEffect(() => {
+        if (localStream && localVideoRef.current && isBroadcasting) {
+            localVideoRef.current.srcObject = localStream;
+        }
+    }, [localStream, isBroadcasting]);
 
     const setupHostSignaling = (channelStreamId: string, media: MediaStream) => {
         const channelName = `stream_signaling:${channelStreamId}`;
@@ -143,7 +192,6 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
         chan.on('broadcast', { event: '*' }, async ({ event, payload }) => {
             const { senderId, targetId, offer, answer, candidate, senderName, text } = payload;
 
-            // Handle incoming chat messages
             if (event === 'chat') {
                 const msg: ChatMessage = {
                     id: Math.random().toString(),
@@ -156,21 +204,17 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                 return;
             }
 
-            // Target verification: host is targetId
             if (targetId !== user!.id && event !== 'join') return;
 
             if (event === 'join') {
                 console.log('Viewer joined:', senderId);
-                // Create RTCPeerConnection for this viewer
                 const pc = new RTCPeerConnection(ICE_SERVERS);
                 peerConnectionsRef.current.set(senderId, pc);
 
-                // Add local tracks to peer connection
                 media.getTracks().forEach(track => {
                     pc.addTrack(track, media);
                 });
 
-                // ICE Candidate gathering
                 pc.onicecandidate = (e) => {
                     if (e.candidate) {
                         chan.send({
@@ -185,11 +229,9 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                     }
                 };
 
-                // Create Offer
                 const sdpOffer = await pc.createOffer();
                 await pc.setLocalDescription(sdpOffer);
 
-                // Send Offer to viewer
                 chan.send({
                     type: 'broadcast',
                     event: 'offer',
@@ -201,15 +243,13 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                 });
 
                 setViewerCount(c => c + 1);
-                showToast(`New viewer connected!`, 'info');
+                showToast(`👀 Someone joined your stream!`, 'info');
             } else if (event === 'answer') {
-                console.log('Received answer from:', senderId);
                 const pc = peerConnectionsRef.current.get(senderId);
                 if (pc) {
                     await pc.setRemoteDescription(new RTCSessionDescription(answer));
                 }
             } else if (event === 'candidate') {
-                console.log('Received candidate from:', senderId);
                 const pc = peerConnectionsRef.current.get(senderId);
                 if (pc && candidate) {
                     await pc.addIceCandidate(new RTCIceCandidate(candidate));
@@ -254,7 +294,6 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
     const startViewing = async () => {
         setLoading(true);
         try {
-            // Verify stream is still active
             const { data: stream, error } = await supabase.from('live_streams')
                 .select('*')
                 .eq('id', streamId!)
@@ -266,29 +305,24 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                 return;
             }
 
-            // Setup peer connection
             const pc = new RTCPeerConnection(ICE_SERVERS);
             singlePeerConnectionRef.current = pc;
 
-            // Handle receiving remote tracks
             const rStream = new MediaStream();
             setRemoteStream(rStream);
             pc.ontrack = (e) => {
-                console.log('Received remote track:', e.track.kind);
                 rStream.addTrack(e.track);
                 if (remoteVideoRef.current) {
                     remoteVideoRef.current.srcObject = rStream;
                 }
             };
 
-            // Setup signaling channel
             const channelName = `stream_signaling:${streamId}`;
             const chan = supabase.channel(channelName);
 
             chan.on('broadcast', { event: '*' }, async ({ event, payload }) => {
                 const { senderId, targetId, offer, candidate, senderName, text } = payload;
 
-                // Handle incoming chat messages
                 if (event === 'chat') {
                     const msg: ChatMessage = {
                         id: Math.random().toString(),
@@ -301,16 +335,13 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                     return;
                 }
 
-                // Verify the offer/candidate is meant for us
                 if (targetId !== user!.id) return;
 
                 if (event === 'offer') {
-                    console.log('Received offer from host');
                     await pc.setRemoteDescription(new RTCSessionDescription(offer));
                     const sdpAnswer = await pc.createAnswer();
                     await pc.setLocalDescription(sdpAnswer);
 
-                    // Send Answer back to host
                     chan.send({
                         type: 'broadcast',
                         event: 'answer',
@@ -322,7 +353,6 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                     });
                     setLoading(false);
                 } else if (event === 'candidate') {
-                    console.log('Received candidate from host');
                     if (candidate) {
                         await pc.addIceCandidate(new RTCIceCandidate(candidate));
                     }
@@ -331,8 +361,6 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
 
             chan.subscribe((status) => {
                 if (status === 'SUBSCRIBED') {
-                    console.log('Viewer signaling subscribed. Joining stream...');
-                    // Broadcast join event
                     chan.send({
                         type: 'broadcast',
                         event: 'join',
@@ -342,7 +370,6 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                         }
                     });
 
-                    // Gather viewer ICE candidates and send to host
                     pc.onicecandidate = (e) => {
                         if (e.candidate) {
                             chan.send({
@@ -359,7 +386,6 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                 }
             });
 
-            // Listen to live_streams table updates for stream ending
             const dbSub = supabase.channel('stream_ended_check')
                 .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'live_streams', filter: `id=eq.${streamId}` },
                     (payload) => {
@@ -378,7 +404,6 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
         }
     };
 
-    // Chat Message Submission
     const sendChatMessage = (e: React.FormEvent) => {
         e.preventDefault();
         if (!messageText.trim() || !channelRef.current) return;
@@ -393,7 +418,6 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
             }
         });
 
-        // Add locally immediately
         const msg: ChatMessage = {
             id: Math.random().toString(),
             senderId: user!.id,
@@ -427,10 +451,10 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
 
     return (
         <div className="modal-overlay" style={{ background: 'rgba(0, 0, 0, 0.95)', zIndex: 999 }}>
-            <div style={{
+            <div className="live-stream-modal-grid" style={{
                 width: '100%',
                 maxWidth: 1000,
-                height: '85vh',
+                height: '90vh',
                 background: 'var(--bg-secondary)',
                 borderRadius: 'var(--border-radius-lg)',
                 border: '1px solid var(--glass-border)',
@@ -455,7 +479,7 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                 </button>
 
                 {/* Left side: Video Area */}
-                <div style={{ background: '#000', display: 'flex', flexDirection: 'column', justifyContent: 'center', position: 'relative' }}>
+                <div style={{ background: '#000', display: 'flex', flexDirection: 'column', justifyContent: 'center', position: 'relative', overflow: 'hidden' }}>
                     {/* Pulsing Live indicator */}
                     {isBroadcasting && (
                         <div style={{
@@ -463,7 +487,7 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                             background: 'rgba(255, 107, 107, 0.2)', border: '1px solid rgba(255,107,107,0.4)',
                             padding: '4px 10px', borderRadius: 999, zIndex: 10
                         }}>
-                            <span style={{ width: 8, height: 8, background: 'var(--coral, #ff6b6b)', borderRadius: '50%', display: 'inline-block', animation: 'bgPulse 1s ease-in-out infinite alternate' }} />
+                            <span style={{ width: 8, height: 8, background: '#ff6b6b', borderRadius: '50%', display: 'inline-block', animation: 'bgPulse 1s ease-in-out infinite alternate' }} />
                             <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#ff6b6b', letterSpacing: 0.5 }}>LIVE</span>
                             {isHost && (
                                 <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.7)', marginLeft: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -477,35 +501,112 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                         <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 20 }}>
                             <div className="spinner" style={{ width: 44, height: 44, borderWidth: 3 }} />
                             <p style={{ marginTop: 16, fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-                                {isHost ? 'Accessing your camera feed...' : 'Connecting to broadcast...'}
+                                {isHost ? 'Starting your broadcast...' : 'Connecting to broadcast...'}
                             </p>
                         </div>
                     )}
 
-                    {/* Pre-stream Setup for Host */}
+                    {/* Pre-stream Setup for Host — Camera Preview */}
                     {isHost && !isBroadcasting && (
-                        <div style={{ padding: 32, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', maxWidth: 440, margin: '0 auto', zIndex: 10 }}>
-                            <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'linear-gradient(135deg, #a78bfa, #7c3aed)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
-                                <Radio size={32} color="white" />
-                            </div>
-                            <h2 style={{ fontSize: '1.25rem', marginBottom: 8, textAlign: 'center' }}>Start Live Stream</h2>
-                            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', marginBottom: 20 }}>
-                                Broadcast your video and audio feed live to all your followers on KSU Connect!
-                            </p>
-                            <input
-                                className="input"
-                                placeholder="Enter stream title (e.g. My study setup...)"
-                                value={title}
-                                onChange={e => setTitle(e.target.value)}
-                                style={{ marginBottom: 16, width: '100%' }}
+                        <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+                            {/* Camera Preview Video */}
+                            <video
+                                ref={previewVideoRef}
+                                autoPlay
+                                playsInline
+                                muted
+                                style={{
+                                    position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
+                                    objectFit: 'cover', display: cameraReady ? 'block' : 'none'
+                                }}
                             />
-                            <button className="btn w-full" style={{ background: 'linear-gradient(135deg, #a78bfa, #7c3aed)', color: 'white', fontWeight: 700 }} onClick={startStreaming}>
-                                <Video size={16} style={{ marginRight: 6 }} /> Go Live Now
-                            </button>
+
+                            {/* Overlay Setup UI */}
+                            <div style={{
+                                position: 'absolute', bottom: 0, left: 0, right: 0,
+                                background: 'linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.6) 60%, transparent 100%)',
+                                padding: '40px 32px 24px',
+                                zIndex: 10,
+                                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12
+                            }}>
+                                {previewLoading && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'rgba(255,255,255,0.7)', fontSize: '0.85rem' }}>
+                                        <div className="spinner" style={{ width: 18, height: 18, borderWidth: 2 }} />
+                                        Accessing camera...
+                                    </div>
+                                )}
+
+                                {!cameraReady && !previewLoading && (
+                                    <div style={{ textAlign: 'center', marginBottom: 8 }}>
+                                        <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'linear-gradient(135deg, #a78bfa, #7c3aed)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
+                                            <Radio size={32} color="white" />
+                                        </div>
+                                        <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.85rem' }}>Camera not available. Check permissions.</p>
+                                        <button
+                                            onClick={startCameraPreview}
+                                            className="btn btn-sm"
+                                            style={{ marginTop: 10, background: 'rgba(167,139,250,0.3)', color: 'white' }}
+                                        >
+                                            Retry Camera Access
+                                        </button>
+                                    </div>
+                                )}
+
+                                {cameraReady && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(34,197,94,0.2)', border: '1px solid rgba(34,197,94,0.4)', padding: '4px 12px', borderRadius: 999 }}>
+                                        <span style={{ width: 6, height: 6, background: '#22c55e', borderRadius: '50%' }} />
+                                        <span style={{ color: '#22c55e', fontSize: '0.75rem', fontWeight: 700 }}>Camera Ready</span>
+                                    </div>
+                                )}
+
+                                {/* Stream Title Input — clearly visible */}
+                                <input
+                                    placeholder="Enter stream title..."
+                                    value={title}
+                                    onChange={e => setTitle(e.target.value)}
+                                    style={{
+                                        width: '100%',
+                                        maxWidth: 400,
+                                        background: 'rgba(255,255,255,0.15)',
+                                        border: '1px solid rgba(255,255,255,0.4)',
+                                        borderRadius: 12,
+                                        padding: '12px 16px',
+                                        color: '#ffffff',
+                                        fontSize: '1rem',
+                                        fontWeight: 600,
+                                        outline: 'none',
+                                        backdropFilter: 'blur(8px)',
+                                        fontFamily: 'Inter, sans-serif',
+                                        caretColor: '#a78bfa',
+                                    }}
+                                    onFocus={e => { e.target.style.borderColor = '#a78bfa'; e.target.style.background = 'rgba(167,139,250,0.2)'; }}
+                                    onBlur={e => { e.target.style.borderColor = 'rgba(255,255,255,0.4)'; e.target.style.background = 'rgba(255,255,255,0.15)'; }}
+                                />
+
+                                {/* Viewer join info */}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'rgba(255,255,255,0.6)', fontSize: '0.78rem' }}>
+                                    <Info size={12} />
+                                    Your followers can join this stream from their feed
+                                </div>
+
+                                <button
+                                    className="btn"
+                                    style={{
+                                        background: 'linear-gradient(135deg, #a78bfa, #7c3aed)',
+                                        color: 'white', fontWeight: 700, fontSize: '1rem',
+                                        padding: '12px 36px', borderRadius: 999,
+                                        boxShadow: '0 4px 20px rgba(167,139,250,0.5)',
+                                    }}
+                                    onClick={startStreaming}
+                                    disabled={!title.trim()}
+                                >
+                                    <Radio size={16} style={{ marginRight: 8 }} /> Go Live Now
+                                </button>
+                            </div>
                         </div>
                     )}
 
-                    {/* Video Player */}
+                    {/* Live Video Player (Host broadcasting) */}
                     {isHost && isBroadcasting && (
                         <video
                             ref={localVideoRef}
@@ -516,26 +617,41 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                         />
                     )}
 
+                    {/* Viewer Video */}
                     {!isHost && streamId && (
-                        <video
-                            ref={remoteVideoRef}
-                            autoPlay
-                            playsInline
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                        />
+                        <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+                            <video
+                                ref={remoteVideoRef}
+                                autoPlay
+                                playsInline
+                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            />
+                            {!remoteStream && !loading && (
+                                <div style={{
+                                    position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
+                                    alignItems: 'center', justifyContent: 'center', gap: 8,
+                                    color: 'rgba(255,255,255,0.5)', fontSize: '0.85rem'
+                                }}>
+                                    <Eye size={32} style={{ opacity: 0.3 }} />
+                                    <p>Waiting for host to start video...</p>
+                                </div>
+                            )}
+                        </div>
                     )}
 
-                    {/* Media Control bar (For Host) */}
+                    {/* Media Control bar (For Host while broadcasting) */}
                     {isHost && isBroadcasting && (
                         <div style={{
                             position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)',
                             display: 'flex', gap: 12, background: 'rgba(0, 0, 0, 0.75)',
-                            padding: '8px 16px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.1)'
+                            padding: '8px 16px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.1)',
+                            zIndex: 10
                         }}>
                             <button
                                 onClick={toggleVideo}
                                 className="btn btn-icon btn-sm"
                                 style={{ background: videoEnabled ? 'rgba(255,255,255,0.1)' : 'rgba(239, 68, 68, 0.2)', color: videoEnabled ? 'white' : '#ef4444' }}
+                                title={videoEnabled ? 'Turn off camera' : 'Turn on camera'}
                             >
                                 {videoEnabled ? <Video size={16} /> : <VideoOff size={16} />}
                             </button>
@@ -543,6 +659,7 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                                 onClick={toggleAudio}
                                 className="btn btn-icon btn-sm"
                                 style={{ background: audioEnabled ? 'rgba(255,255,255,0.1)' : 'rgba(239, 68, 68, 0.2)', color: audioEnabled ? 'white' : '#ef4444' }}
+                                title={audioEnabled ? 'Mute mic' : 'Unmute mic'}
                             >
                                 {audioEnabled ? <Mic size={16} /> : <MicOff size={16} />}
                             </button>
@@ -564,9 +681,27 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                 }}>
                     {/* Chat Header */}
                     <div style={{ padding: 16, borderBottom: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Radio size={16} className="gradient-text" />
+                        <Radio size={16} style={{ color: '#a78bfa' }} />
                         <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>Live Stream Chat</span>
+                        {!isHost && (
+                            <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                <Eye size={12} /> Watching live
+                            </span>
+                        )}
                     </div>
+
+                    {/* Viewer join info banner (host view) */}
+                    {isHost && isBroadcasting && (
+                        <div style={{
+                            margin: '8px 12px', padding: '8px 12px',
+                            background: 'rgba(167,139,250,0.1)', border: '1px solid rgba(167,139,250,0.3)',
+                            borderRadius: 10, fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)',
+                            display: 'flex', alignItems: 'center', gap: 6
+                        }}>
+                            <Info size={12} />
+                            Followers can join from their feed — share that you're live!
+                        </div>
+                    )}
 
                     {/* Chat Scrollable Area */}
                     <div style={{ flex: 1, padding: 16, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>

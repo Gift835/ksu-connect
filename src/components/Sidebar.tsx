@@ -3,6 +3,7 @@ import { Home, Compass, Bell, MessageCircle, User, TrendingUp, Users, LogOut, Cr
 
 import { useAuth } from '../context/AuthContext';
 import { useSubscription } from '../context/SubscriptionContext';
+import { useTranslation } from '../lib/translations';
 
 interface SidebarProps {
   activePage: string;
@@ -40,20 +41,21 @@ export default function Sidebar({ activePage, setActivePage, unreadNotifs, unrea
       alert('To install KSU Connect:\n\n📱 Android: Open in Chrome → Menu → "Install app" or "Add to Home screen"\n💻 Desktop: Open in Chrome → 🔒 (lock icon) → "Install KSU Connect"\n\nOr simply use the browser bookmark!');
     }
   };
+  const { t } = useTranslation();
   const initials = profile?.full_name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
     || profile?.username?.[0]?.toUpperCase() || '?';
 
   const navItems = [
-    { id: 'feed', icon: Home, label: 'Home Feed' },
-    { id: 'explore', icon: Compass, label: 'Explore' },
-    { id: 'notifications', icon: Bell, label: 'Notifications' },
-    { id: 'messages', icon: MessageCircle, label: 'Messages' },
-    { id: 'profile', icon: User, label: 'My Profile' },
+    { id: 'feed', icon: Home, label: t.feed },
+    { id: 'explore', icon: Compass, label: t.explore },
+    { id: 'notifications', icon: Bell, label: t.notifications },
+    { id: 'messages', icon: MessageCircle, label: t.messages },
+    { id: 'profile', icon: User, label: t.profile },
     { id: 'trending', icon: TrendingUp, label: 'Trending' },
     { id: 'people', icon: Users, label: 'People' },
-    { id: 'premium', icon: isActive ? Crown : CreditCard, label: isActive ? 'Premium' : 'Go Premium' },
-    ...(profile?.is_admin ? [{ id: 'admin', icon: Shield, label: 'Admin Panel' }] : []),
-    { id: 'settings', icon: SettingsIcon, label: 'Settings' },
+    { id: 'premium', icon: isActive ? Crown : CreditCard, label: isActive ? t.premium : 'Go Premium' },
+    ...(profile?.is_admin ? [{ id: 'admin', icon: Shield, label: t.admin }] : []),
+    { id: 'settings', icon: SettingsIcon, label: t.settings },
   ];
 
 
@@ -143,7 +145,7 @@ export default function Sidebar({ activePage, setActivePage, unreadNotifs, unrea
         </button>
         <button className="nav-item" onClick={signOut}>
           <LogOut size={20} />
-          <span style={{ fontSize: '0.9rem' }}>Sign Out</span>
+          <span style={{ fontSize: '0.9rem' }}>{t.signOut}</span>
         </button>
         <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', padding: '8px 16px' }}>
           KSU Connect © 2026

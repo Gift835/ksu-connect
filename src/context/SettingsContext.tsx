@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 
 export type ThemeMode = 'dark' | 'light';
-export type Language = 'en' | 'pcm' | 'yo' | 'ig' | 'ha';
+export type Language = 'en' | 'pcm' | 'yo' | 'ig' | 'ha' | 'fr' | 'ar' | 'es' | 'pt' | 'sw' | 'zh' | 'de' | 'it' | 'ja' | 'ko' | 'ru';
 export type FontSize = 'small' | 'medium' | 'large';
 
 export interface AppSettings {
