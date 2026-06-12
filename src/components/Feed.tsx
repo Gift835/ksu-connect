@@ -73,12 +73,20 @@ export default function Feed({ setActivePage, onStartLive, onWatchLive }: {
   }, [user]);
 
   const fetchLiveStreams = async () => {
-    // Only show streams started in the last 3 hours — prevents ghost 'live' entries
-    const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+    // Auto-end any stream still marked 'live' after 30 minutes (handles crashes/network drops)
+    const thirtyMinsAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    await supabase
+      .from('live_streams')
+      .update({ status: 'ended', ended_at: new Date().toISOString() })
+      .eq('status', 'live')
+      .lt('created_at', thirtyMinsAgo);
+
+    // Only show streams started in the last 1 hour that are truly live
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     const { data } = await supabase.from('live_streams')
       .select('*, profiles:host_id(username, full_name, avatar_url, is_verified)')
       .eq('status', 'live')
-      .gte('created_at', threeHoursAgo)
+      .gte('created_at', oneHourAgo)
       .order('created_at', { ascending: false });
     if (data) setLiveStreams(data as any);
   };

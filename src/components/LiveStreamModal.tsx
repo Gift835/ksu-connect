@@ -140,12 +140,10 @@ export default function LiveStreamModal({
         }
     };
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  HOST — Go Live
-    // ─────────────────────────────────────────────────────────────────────────
     const startStreaming = async () => {
         if (!title.trim()) { showToast('Please enter a stream title', 'error'); return; }
         setLoading(true);
+        let insertedStreamId: string | null = null;
         try {
             // 1. Create DB record
             const { data: stream, error: sErr } = await supabase
@@ -153,6 +151,7 @@ export default function LiveStreamModal({
                 .insert({ host_id: user!.id, title: title.trim(), status: 'live' })
                 .select().single();
             if (sErr) throw sErr;
+            insertedStreamId = stream.id;
             const sid = stream.id;
             setStreamId(sid);
 
@@ -197,7 +196,24 @@ export default function LiveStreamModal({
             showToast('🎥 You are now LIVE! Viewers can join from their feed.', 'success');
         } catch (err: any) {
             console.error('[KSU-Live] Host start failed:', err);
-            showToast('Could not start stream: ' + (err.message || err), 'error');
+
+            // ── Clean up the DB record so it never shows as a ghost stream ──
+            if (insertedStreamId) {
+                await supabase.from('live_streams')
+                    .update({ status: 'ended', ended_at: new Date().toISOString() })
+                    .eq('id', insertedStreamId);
+            }
+
+            // ── Detect the Agora App Certificate error ──
+            const msg: string = err?.message || String(err);
+            if (msg.includes('CAN_NOT_GET_GATEWAY_SERVER') || msg.includes('dynamic use static key')) {
+                showToast(
+                    '⚠️ Agora App Certificate is ON. Go to console.agora.io → your project → Edit → disable "Primary Certificate" → Save.',
+                    'error'
+                );
+            } else {
+                showToast('Could not start stream: ' + msg, 'error');
+            }
             setLoading(false);
         }
     };
