@@ -4,16 +4,43 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { Heart, MessageCircle, Share2, MoreHorizontal, Bookmark, BadgeCheck, Send, ChevronDown, ChevronUp, Trash2, X, Play } from 'lucide-react';
 
-// ── VideoPlayer: autoplay when in view, loop forever, tap to unmute ──
+// ─────────────────────────────────────────────────────────────────────────────
+// GLOBAL MUTE BUS — shared across every VideoPlayer instance on the page.
+// When one video is unmuted, ALL others unmute instantly.
+// Resets to `true` on page refresh (module re-evaluation).
+// ─────────────────────────────────────────────────────────────────────────────
+let globalMuted = true;
+const muteListeners = new Set<(m: boolean) => void>();
+
+function setGlobalMuted(muted: boolean) {
+  globalMuted = muted;
+  muteListeners.forEach(cb => cb(muted));
+}
+
+// ── VideoPlayer: autoplay when in view, loop forever, shared unmute state ──
 function VideoPlayer({ src }: { src: string }) {
   const videoRef  = useRef<HTMLVideoElement>(null);
   const wrapRef   = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [poster,  setPoster]  = useState<string | undefined>(undefined);
-  const [muted,   setMuted]   = useState(true);
-  const [started, setStarted] = useState(false); // has the video started at least once?
+  const [muted,   setMuted]   = useState(globalMuted); // init from shared state
+  const [started, setStarted] = useState(false);
 
-  // ── Capture first frame for the thumbnail (best-effort, CORS-safe) ──
+  // ── Subscribe to global mute bus ──────────────────────────────────────────
+  useEffect(() => {
+    const handler = (m: boolean) => {
+      setMuted(m);
+      const video = videoRef.current;
+      if (video) {
+        video.muted = m;
+        if (!m && video.paused) video.play().catch(() => {});
+      }
+    };
+    muteListeners.add(handler);
+    return () => { muteListeners.delete(handler); };
+  }, []);
+
+  // ── Capture first frame for thumbnail (CORS-safe) ─────────────────────────
   useEffect(() => {
     const video  = videoRef.current;
     const canvas = canvasRef.current;
@@ -28,7 +55,7 @@ function VideoPlayer({ src }: { src: string }) {
           const url = canvas.toDataURL('image/jpeg', 0.8);
           if (url.length > 5000) setPoster(url);
         }
-      } catch (_) { /* CORS blocked – no thumbnail, still plays fine */ }
+      } catch (_) { /* CORS blocked */ }
       video.currentTime = 0;
     };
     const onMeta = () => { try { video.currentTime = 0.5; } catch (_) {} };
@@ -40,15 +67,15 @@ function VideoPlayer({ src }: { src: string }) {
     };
   }, [src]);
 
-  // ── Play when ≥50 % visible, pause when scrolled away ──
+  // ── Play when ≥50 % visible, pause when scrolled away ────────────────────
   useEffect(() => {
     const video = videoRef.current;
     const wrap  = wrapRef.current;
     if (!video || !wrap) return;
-
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
+          video.muted = globalMuted; // sync mute state when starting
           video.play().then(() => setStarted(true)).catch(() => {});
         } else {
           video.pause();
@@ -62,10 +89,8 @@ function VideoPlayer({ src }: { src: string }) {
 
   const toggleMute = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const video = videoRef.current;
-    if (!video) return;
-    video.muted = !video.muted;
-    setMuted(video.muted);
+    // Broadcast to ALL videos on the feed
+    setGlobalMuted(!globalMuted);
   };
 
   return (
@@ -93,7 +118,7 @@ function VideoPlayer({ src }: { src: string }) {
         </div>
       )}
 
-      {/* The actual video – autoplay + loop + muted (required by browsers) */}
+      {/* The actual video – autoplay + loop + muted (browsers require muted for autoplay) */}
       <video
         ref={videoRef}
         src={src}
@@ -111,16 +136,18 @@ function VideoPlayer({ src }: { src: string }) {
       {/* Mute / Unmute pill — bottom-right corner */}
       <button
         onClick={toggleMute}
-        title={muted ? 'Tap to unmute' : 'Tap to mute'}
+        title={muted ? 'Tap to unmute all videos' : 'Tap to mute all videos'}
         style={{
           position: 'absolute', bottom: 10, right: 10, zIndex: 10,
           display: 'flex', alignItems: 'center', gap: 5,
-          background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(8px)',
-          border: '1px solid rgba(255,255,255,0.25)',
+          background: muted ? 'rgba(0,0,0,0.65)' : 'rgba(59,130,246,0.75)',
+          backdropFilter: 'blur(8px)',
+          border: `1px solid ${muted ? 'rgba(255,255,255,0.25)' : 'rgba(59,130,246,0.6)'}`,
           borderRadius: 99, padding: '5px 12px',
           color: 'white', fontSize: '0.75rem', fontWeight: 600,
-          cursor: 'pointer', transition: 'all 0.15s',
+          cursor: 'pointer', transition: 'all 0.2s',
           fontFamily: 'Inter, sans-serif',
+          boxShadow: muted ? 'none' : '0 2px 12px rgba(59,130,246,0.4)',
         }}
       >
         <span style={{ fontSize: '1rem' }}>{muted ? '🔇' : '🔊'}</span>
@@ -128,6 +155,7 @@ function VideoPlayer({ src }: { src: string }) {
       </button>
     </div>
   );
+
 }
 
 interface Post {
