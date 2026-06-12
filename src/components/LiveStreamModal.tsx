@@ -63,8 +63,9 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
     // Chat states
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
     const [messageText, setMessageText] = useState('');
-    const [chatOpen, setChatOpen] = useState(false); // mobile: chat collapsed by default
+    const [chatOpen, setChatOpen] = useState(false);
     const [autoPlayBlocked, setAutoPlayBlocked] = useState(false);
+    const [viewerStatus, setViewerStatus] = useState('Connecting...');
 
     // Refs for video components
     const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -74,6 +75,7 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
 
     // WebRTC Signaling Refs
     const channelRef = useRef<any>(null);
+    const streamEndedChannelRef = useRef<any>(null); // separate channel for stream-ended DB watch
     const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
     const singlePeerConnectionRef = useRef<RTCPeerConnection | null>(null);
     const localStreamRef = useRef<MediaStream | null>(null);
@@ -154,9 +156,12 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
             singlePeerConnectionRef.current.close();
             singlePeerConnectionRef.current = null;
         }
-        // Unsubscribe signaling channel
+        // Unsubscribe signaling channels
         if (channelRef.current) {
             supabase.removeChannel(channelRef.current);
+        }
+        if (streamEndedChannelRef.current) {
+            supabase.removeChannel(streamEndedChannelRef.current);
         }
     };
 
@@ -330,6 +335,14 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                 await supabase.from('live_streams')
                     .update({ status: 'ended', ended_at: new Date().toISOString() })
                     .eq('id', streamId);
+                // Also broadcast via realtime so viewers get notified instantly
+                if (channelRef.current) {
+                    channelRef.current.send({
+                        type: 'broadcast',
+                        event: 'stream_ended',
+                        payload: { streamId }
+                    });
+                }
             }
             cleanupConnections();
             showToast('Live stream ended successfully', 'success');
@@ -388,7 +401,7 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                 if (pc.connectionState === 'connected') setLoading(false);
             };
 
-            // ─── BROADCAST CHANNEL ─── for chat + ICE candidates (fast path)
+            // ─── BROADCAST CHANNEL ─── for chat + ICE candidates + stream_ended (fast path)
             const bcastChan = supabase.channel(`stream_bcast:${streamId}`);
             channelRef.current = bcastChan;
 
@@ -400,6 +413,13 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                         id: Math.random().toString(), senderId: msgSender,
                         senderName, text, timestamp: Date.now()
                     }]);
+                    return;
+                }
+
+                // Host ended the stream — close immediately
+                if (event === 'stream_ended') {
+                    showToast('The host has ended this live stream.', 'info');
+                    onClose();
                     return;
                 }
 
@@ -472,8 +492,8 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                     }
                 });
 
-            // Watch for stream ending
-            supabase.channel(`stream_ended_${streamId}`)
+            // Watch for stream ending via DB (fallback in case broadcast missed)
+            const endedChannel = supabase.channel(`stream_ended_${streamId}_${user!.id}`)
                 .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'live_streams', filter: `id=eq.${streamId}` },
                     (payload) => {
                         if ((payload.new as any).status === 'ended') {
@@ -482,6 +502,7 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                         }
                     })
                 .subscribe();
+            streamEndedChannelRef.current = endedChannel;
 
             // Auto-timeout loading spinner after 20s
             setTimeout(() => setLoading(false), 20000);

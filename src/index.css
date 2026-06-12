@@ -2907,22 +2907,50 @@ textarea.input {
   box-shadow: 0 8px 28px rgba(99,102,241,0.1);
 }
 
-/* ── Mobile: stack brand panel below form ── */
-@media (max-width: 840px) {
-  /* The login layout grid (set via inline style) needs override */
+/* ── Default desktop: 2-column split ── */
+[data-login-layout] {
+  grid-template-columns: 1fr 1fr;
+}
+
+/* ── Mobile: stack to single column ── */
+@media (max-width: 900px) {
   [data-login-layout] {
     grid-template-columns: 1fr !important;
+    display: grid !important;
   }
 
-  /* Brand panel: hide on very small screens to keep form usable */
+  /* Brand panel: hide on mobile to keep form usable */
   [data-login-brand] {
     display: none !important;
   }
 
-  /* Form panel: full width, lighter padding */
+  /* Form panel: full width, centered */
   [data-login-form] {
     padding: 28px 16px 40px !important;
     background: linear-gradient(145deg, #f8f7ff, #fdf4ff) !important;
+    min-height: 100dvh !important;
+    justify-content: center !important;
+    padding-top: 48px !important;
+  }
+}
+
+@media (max-width: 520px) {
+  [data-login-form] {
+    padding: 24px 12px 32px !important;
+    padding-top: 36px !important;
+  }
+
+  [data-form-card] {
+    padding: 24px 18px 20px !important;
+    border-radius: 20px !important;
+  }
+
+  [data-login-root] h2 {
+    font-size: 1.4rem !important;
+  }
+
+  [data-login-root] [data-row2] {
+    grid-template-columns: 1fr !important;
   }
 }
 
@@ -2937,9 +2965,9 @@ textarea.input {
   background: #f8fafc !important;
   color: #1e293b !important;
   border-color: #e2e8f0 !important;
-  font-size: 16px !important;         /* prevent iOS zoom */
+  font-size: 16px !important;
   -webkit-appearance: none;
-  appearance: none;                   /* standard property for compatibility */
+  appearance: none;
 }
 
 [data-login-root] input::placeholder {
@@ -2953,22 +2981,6 @@ textarea.input {
   outline: none !important;
 }
 
-/* ── Form card shadow + glass on mobile ── */
-@media (max-width: 520px) {
-  [data-login-root] [data-form-card] {
-    padding: 24px 20px 20px !important;
-    border-radius: 22px !important;
-  }
-
-  [data-login-root] h2 {
-    font-size: 1.4rem !important;
-  }
-
-  [data-login-root] [data-row2] {
-    grid-template-columns: 1fr !important;
-  }
-}
-
 /* ── Framer-motion brand panel floating shapes ── */
 [data-login-root] .lm-blob {
   position: fixed;
@@ -2976,6 +2988,11 @@ textarea.input {
   filter: blur(70px);
   pointer-events: none;
   z-index: 0;
+}
+
+@keyframes slideUpIn {
+  from { opacity: 0; transform: translateY(40px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 

@@ -56,15 +56,15 @@ export default function Feed({ setActivePage, onStartLive, onWatchLive }: {
     fetchFeed();
     fetchLiveStreams();
 
-    // Realtime updates for live streams
-    const streamSub = supabase.channel('live_streams_changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'live_streams' }, () => {
-        fetchLiveStreams();
-      })
+    // Realtime updates for live streams — listen to INSERT, UPDATE and DELETE explicitly
+    const streamSub = supabase.channel('live_streams_realtime')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'live_streams' }, fetchLiveStreams)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'live_streams' }, fetchLiveStreams)
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'live_streams' }, fetchLiveStreams)
       .subscribe();
 
-    // Fallback poll every 30s in case realtime misses an update
-    const pollInterval = setInterval(fetchLiveStreams, 30000);
+    // Fallback poll every 20s in case realtime misses an update
+    const pollInterval = setInterval(fetchLiveStreams, 20000);
 
     return () => {
       supabase.removeChannel(streamSub);
@@ -73,9 +73,12 @@ export default function Feed({ setActivePage, onStartLive, onWatchLive }: {
   }, [user]);
 
   const fetchLiveStreams = async () => {
+    // Only show streams started in the last 3 hours — prevents ghost 'live' entries
+    const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
     const { data } = await supabase.from('live_streams')
       .select('*, profiles:host_id(username, full_name, avatar_url, is_verified)')
       .eq('status', 'live')
+      .gte('created_at', threeHoursAgo)
       .order('created_at', { ascending: false });
     if (data) setLiveStreams(data as any);
   };

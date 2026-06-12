@@ -642,9 +642,9 @@ const styles: Record<string, React.CSSProperties> = {
 
   layout: {
     display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
     width: '100%',
     minHeight: '100vh',
+    minHeight: '100dvh' as any,
     position: 'relative',
     zIndex: 1,
   },
