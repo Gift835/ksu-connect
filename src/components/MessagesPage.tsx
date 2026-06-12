@@ -186,7 +186,8 @@ export default function MessagesPage({ initialUserId, setActivePage }: { initial
   const inputRef = useRef<HTMLInputElement>(null);
   const [showEmoji, setShowEmoji] = useState(false);
 
-  // ── Keyboard viewport fix: keep input bar glued above the on-screen keyboard ──
+  // ── Keyboard viewport fix: shrink the whole container to the visual viewport ──
+  const layoutRef = useRef<HTMLDivElement>(null);
   const chatAreaRef = useRef<HTMLDivElement>(null);
   const inputBarRef = useRef<HTMLFormElement>(null);
 
@@ -194,22 +195,21 @@ export default function MessagesPage({ initialUserId, setActivePage }: { initial
     const vv = (window as any).visualViewport as VisualViewport | undefined;
     if (!vv) return;
 
+    const HEADER_H = 64;   // --header-height
+    const MAIN_PAD = 24;   // app-main padding-top
+
     const onResize = () => {
-      const bar = inputBarRef.current;
-      if (!bar) return;
-      // Distance from the bottom of the visual viewport to the bottom of the layout viewport
-      const offset = window.innerHeight - vv.height - vv.offsetTop;
-      bar.style.transform = `translateY(-${Math.max(0, offset)}px)`;
-      // Scroll messages to bottom
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      const el = layoutRef.current;
+      if (!el) return;
+      // vv.height = visible area above keyboard
+      const newH = Math.floor(vv.height) - HEADER_H - MAIN_PAD;
+      el.style.height = `${Math.max(200, newH)}px`;
+      // Scroll messages into view after resize settles
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'instant' }), 60);
     };
 
     vv.addEventListener('resize', onResize);
-    vv.addEventListener('scroll', onResize);
-    return () => {
-      vv.removeEventListener('resize', onResize);
-      vv.removeEventListener('scroll', onResize);
-    };
+    return () => vv.removeEventListener('resize', onResize);
   }, []);
 
   useEffect(() => { if (user) fetchConversations(); }, [user]);
@@ -354,13 +354,14 @@ export default function MessagesPage({ initialUserId, setActivePage }: { initial
   const myInitials = profile?.full_name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || profile?.username?.[0]?.toUpperCase() || '?';
 
   return (
-    <div className="messages-layout" style={{
+    <div ref={layoutRef} className="messages-layout" style={{
       gap: 0,
       height: 'calc(100vh - var(--header-height) - 48px)',
       background: 'var(--glass-bg)',
       borderRadius: 'var(--border-radius-lg)',
       overflow: 'hidden',
       border: '1px solid var(--glass-border)',
+      transition: 'height 0.05s linear',
     }}>
       {/* ── Sidebar ── */}
       <div className={`messages-sidebar${selectedUser ? '' : ' no-chat-selected'}`}
@@ -513,16 +514,14 @@ export default function MessagesPage({ initialUserId, setActivePage }: { initial
             <EmojiPicker onSelect={insertEmoji} onClose={() => setShowEmoji(false)} />
           )}
 
-          {/* ── Input bar – stuck above keyboard via visualViewport ── */}
+          {/* ── Input bar ── */}
           <form ref={inputBarRef} onSubmit={sendMessage} style={{
             padding: '10px 12px',
             borderTop: '1px solid var(--glass-border)',
-            background: 'rgba(10,10,15,0.95)',
+            background: 'rgba(10,10,15,0.97)',
             backdropFilter: 'blur(20px)',
             display: 'flex', gap: 8, alignItems: 'center',
             flexShrink: 0,
-            /* sticky transform applied via JS */
-            willChange: 'transform',
             paddingBottom: 'env(safe-area-inset-bottom, 10px)',
           }}>
             {/* Emoji toggle button */}

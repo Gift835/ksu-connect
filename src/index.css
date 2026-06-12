@@ -3019,12 +3019,22 @@ textarea.input {
   display: grid;
   grid-template-columns: 300px 1fr;
   overflow: hidden;
+  /* Height is set inline; transition smooths keyboard open/close */
+  transition: height 0.05s linear;
 }
 
 .messages-sidebar {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+/* Chat area fills remaining space with NO overflow outside the box */
+.messages-layout > div:last-child {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 /* Chat bubble base */
@@ -3060,9 +3070,18 @@ textarea.input {
 
 /* Mobile: show back button, collapse sidebar */
 @media (max-width: 640px) {
+  /* On mobile, the app-main should not have extra bottom padding
+     that creates white space under the input bar                  */
+  .app-main:has(.messages-layout) {
+    padding-bottom: 0 !important;
+    overflow: hidden; /* prevent bounce scroll revealing white */
+  }
+
   .messages-layout {
     grid-template-columns: 1fr;
     position: relative;
+    /* Fill app-main fully on mobile */
+    border-radius: var(--border-radius-md) !important;
   }
 
   .messages-sidebar {
@@ -3083,4 +3102,5 @@ textarea.input {
     display: inline-flex !important;
   }
 }
+
 
