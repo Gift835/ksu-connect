@@ -22,9 +22,10 @@ function VideoPlayer({ src }: { src: string }) {
   const videoRef  = useRef<HTMLVideoElement>(null);
   const wrapRef   = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [poster,  setPoster]  = useState<string | undefined>(undefined);
-  const [muted,   setMuted]   = useState(globalMuted); // init from shared state
-  const [started, setStarted] = useState(false);
+  const [poster,     setPoster]     = useState<string | undefined>(undefined);
+  const [muted,      setMuted]      = useState(globalMuted);
+  const [started,    setStarted]    = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
 
   // ── Subscribe to global mute bus ──────────────────────────────────────────
   useEffect(() => {
@@ -38,6 +39,23 @@ function VideoPlayer({ src }: { src: string }) {
     };
     muteListeners.add(handler);
     return () => { muteListeners.delete(handler); };
+  }, []);
+
+  // ── Track fullscreen changes (user can exit with Escape too) ──────────────
+  useEffect(() => {
+    const onChange = () => {
+      const isFs = !!(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement
+      );
+      setFullscreen(isFs);
+    };
+    document.addEventListener('fullscreenchange', onChange);
+    document.addEventListener('webkitfullscreenchange', onChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange);
+      document.removeEventListener('webkitfullscreenchange', onChange);
+    };
   }, []);
 
   // ── Capture first frame for thumbnail (CORS-safe) ─────────────────────────
@@ -75,7 +93,7 @@ function VideoPlayer({ src }: { src: string }) {
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
-          video.muted = globalMuted; // sync mute state when starting
+          video.muted = globalMuted;
           video.play().then(() => setStarted(true)).catch(() => {});
         } else {
           video.pause();
@@ -89,12 +107,59 @@ function VideoPlayer({ src }: { src: string }) {
 
   const toggleMute = (e: React.MouseEvent) => {
     e.stopPropagation();
-    // Broadcast to ALL videos on the feed
     setGlobalMuted(!globalMuted);
   };
 
+  const toggleFullscreen = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+
+    if (!document.fullscreenElement && !(document as any).webkitFullscreenElement) {
+      // Enter fullscreen — try standard then webkit (iOS Safari)
+      if (wrap.requestFullscreen) {
+        wrap.requestFullscreen();
+      } else if ((wrap as any).webkitRequestFullscreen) {
+        (wrap as any).webkitRequestFullscreen();
+      } else {
+        // iOS fallback: use the video's native fullscreen
+        const vid = videoRef.current;
+        if (vid && (vid as any).webkitEnterFullscreen) {
+          (vid as any).webkitEnterFullscreen();
+        }
+      }
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      } else if ((document as any).webkitExitFullscreen) {
+        (document as any).webkitExitFullscreen();
+      }
+    }
+  };
+
+  // Pill button style (reused for both buttons)
+  const pillStyle = (active: boolean, color = '#3b82f6'): React.CSSProperties => ({
+    display: 'flex', alignItems: 'center', gap: 5,
+    background: active ? `${color}cc` : 'rgba(0,0,0,0.65)',
+    backdropFilter: 'blur(8px)',
+    border: `1px solid ${active ? color : 'rgba(255,255,255,0.25)'}`,
+    borderRadius: 99, padding: '5px 12px',
+    color: 'white', fontSize: '0.75rem', fontWeight: 600,
+    cursor: 'pointer', transition: 'all 0.2s',
+    fontFamily: 'Inter, sans-serif',
+    boxShadow: active ? `0 2px 12px ${color}66` : 'none',
+    whiteSpace: 'nowrap' as const,
+  });
+
   return (
-    <div ref={wrapRef} style={{ position: 'relative', lineHeight: 0, background: '#111', overflow: 'hidden' }}>
+    <div
+      ref={wrapRef}
+      style={{
+        position: 'relative', lineHeight: 0, background: '#111', overflow: 'hidden',
+        // When fullscreen: fill the entire screen, video centres itself
+        ...(fullscreen ? { display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' } : {}),
+      }}
+    >
       {/* Hidden canvas for thumbnail */}
       <canvas ref={canvasRef} style={{ display: 'none' }} />
 
@@ -118,7 +183,7 @@ function VideoPlayer({ src }: { src: string }) {
         </div>
       )}
 
-      {/* The actual video – autoplay + loop + muted (browsers require muted for autoplay) */}
+      {/* The actual video */}
       <video
         ref={videoRef}
         src={src}
@@ -128,34 +193,35 @@ function VideoPlayer({ src }: { src: string }) {
         playsInline
         preload="auto"
         className="post-media"
-        style={{ maxHeight: 400, width: '100%', background: '#111', display: 'block' }}
+        style={{
+          width: '100%', background: '#111', display: 'block',
+          maxHeight: fullscreen ? '100vh' : 400,
+          objectFit: fullscreen ? 'contain' : 'cover',
+        }}
         onPlay={() => setStarted(true)}
         onError={e => { (e.target as HTMLVideoElement).parentElement!.style.display = 'none'; }}
       />
 
-      {/* Mute / Unmute pill — bottom-right corner */}
-      <button
-        onClick={toggleMute}
-        title={muted ? 'Tap to unmute all videos' : 'Tap to mute all videos'}
-        style={{
-          position: 'absolute', bottom: 10, right: 10, zIndex: 10,
-          display: 'flex', alignItems: 'center', gap: 5,
-          background: muted ? 'rgba(0,0,0,0.65)' : 'rgba(59,130,246,0.75)',
-          backdropFilter: 'blur(8px)',
-          border: `1px solid ${muted ? 'rgba(255,255,255,0.25)' : 'rgba(59,130,246,0.6)'}`,
-          borderRadius: 99, padding: '5px 12px',
-          color: 'white', fontSize: '0.75rem', fontWeight: 600,
-          cursor: 'pointer', transition: 'all 0.2s',
-          fontFamily: 'Inter, sans-serif',
-          boxShadow: muted ? 'none' : '0 2px 12px rgba(59,130,246,0.4)',
-        }}
-      >
-        <span style={{ fontSize: '1rem' }}>{muted ? '🔇' : '🔊'}</span>
-        {muted ? 'Unmute' : 'Mute'}
-      </button>
+      {/* ── Bottom controls row ── */}
+      <div style={{
+        position: 'absolute', bottom: 10, left: 10, right: 10,
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        zIndex: 10, pointerEvents: 'none',
+      }}>
+        {/* Mute / Unmute — left */}
+        <button onClick={toggleMute} style={{ ...pillStyle(!muted), pointerEvents: 'auto' }}>
+          <span style={{ fontSize: '1rem' }}>{muted ? '🔇' : '🔊'}</span>
+          {muted ? 'Unmute' : 'Mute'}
+        </button>
+
+        {/* Fullscreen — right */}
+        <button onClick={toggleFullscreen} style={{ ...pillStyle(fullscreen, '#8b5cf6'), pointerEvents: 'auto' }}>
+          <span style={{ fontSize: '0.9rem' }}>{fullscreen ? '⛶' : '⛶'}</span>
+          {fullscreen ? 'Exit' : 'Fullscreen'}
+        </button>
+      </div>
     </div>
   );
-
 }
 
 interface Post {
