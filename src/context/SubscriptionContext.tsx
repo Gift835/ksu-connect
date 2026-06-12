@@ -125,12 +125,15 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
         const expires = new Date();
         expires.setDate(expires.getDate() + 30);
 
+        // Use the plan_type from the promo code (defaults to 'monthly' if not set)
+        const promoPlan = promo.plan_type === 'live' ? 'live' : 'monthly';
+
         await supabase.from('subscriptions').update({ status: 'cancelled', updated_at: now.toISOString() }).eq('user_id', user.id).eq('status', 'active');
 
         const { error: sErr } = await supabase.from('subscriptions').insert({
             user_id: user.id,
             status: 'active',
-            plan: 'monthly',
+            plan: promoPlan,
             amount_paid: 0,
             currency: 'NGN',
             payment_provider: 'promo_code',
@@ -141,15 +144,24 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
         });
         if (sErr) return { ok: false, error: sErr.message };
 
+        // If this is a Live promo, grant verified badge too
+        if (promoPlan === 'live') {
+            await supabase.from('profiles').update({ is_verified: true }).eq('id', user.id);
+        }
+
         await supabase.from('admin_actions').insert({
             admin_id: user.id,
             action_type: 'promo_redeem',
             target_user_id: user.id,
-            details: { promo_code: promo.code },
+            details: { promo_code: promo.code, plan: promoPlan },
         }).then(() => { });
 
         await fetchSubscription();
-        showToast(`🎉 Promo code applied! You're premium for 30 days.`, 'success');
+        if (promoPlan === 'live') {
+            showToast(`🎉 Live Streamer promo applied! Verified badge activated for 30 days.`, 'success');
+        } else {
+            showToast(`🎉 Promo code applied! You're premium for 30 days.`, 'success');
+        }
         return { ok: true };
     };
 

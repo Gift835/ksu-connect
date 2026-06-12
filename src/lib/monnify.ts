@@ -24,8 +24,7 @@ export interface MonnifyCheckoutOptions {
 
 // Monnify SDK script URLs
 const SCRIPT_URLS = [
-    'https://sandbox.monnify.com/plugin/monnify.js',  // Sandbox SDK
-    'https://app.monnify.com/plugin/monnify.js',       // Production SDK
+    'https://sdk.monnify.com/plugin/monnify.js',
 ];
 
 let scriptLoaded = false;
@@ -124,7 +123,7 @@ export async function openMonnifyCheckout(opts: MonnifyCheckoutOptions) {
             contractCode: MONNIFY_CONTRACT_CODE,
             paymentDescription: opts.paymentDescription,
             metadata: opts.metadata || {},
-            isTestMode: true,              // set false when going live
+            isTestMode: MONNIFY_API_KEY.startsWith('MK_TEST_'),              // dynamic based on key prefix
             onLoadStart: () => {
                 console.log('Monnify checkout loading...');
             },

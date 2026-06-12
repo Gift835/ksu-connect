@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useSubscription } from '../context/SubscriptionContext';
-import { Image, MapPin, Globe, Lock, Users, X, Smile, Crown, Ban, Sparkles } from 'lucide-react';
+import { Image, MapPin, Globe, Lock, Users, X, Smile, Crown, Ban, Sparkles, Radio, Video } from 'lucide-react';
 import PostCard from './PostCard';
 
 interface Post {
@@ -14,13 +14,33 @@ interface Post {
   profiles: { username: string; full_name: string | null; avatar_url: string | null; is_verified: boolean; };
 }
 
+interface LiveStream {
+  id: string;
+  host_id: string;
+  title: string;
+  status: 'live' | 'ended';
+  created_at: string;
+  viewer_count: number;
+  profiles: {
+    username: string;
+    full_name: string | null;
+    avatar_url: string | null;
+    is_verified: boolean;
+  };
+}
+
 const EMOJIS = ['😊', '🎉', '🔥', '💯', '👏', '❤️', '😂', '🙌', '✨', '🚀', '💪', '👀', '😎', '🤝', '📚', '🏆'];
 
-export default function Feed({ setActivePage }: { setActivePage: (p: string) => void }) {
+export default function Feed({ setActivePage, onStartLive, onWatchLive }: {
+  setActivePage: (p: string) => void;
+  onStartLive: () => void;
+  onWatchLive: (streamId: string, title: string, hostId: string) => void;
+}) {
   const { user, profile, refreshProfile } = useAuth();
   const { showToast } = useToast();
-  const { isActive, monthlyPrice } = useSubscription();
+  const { isActive, isLive, monthlyPrice } = useSubscription();
   const [posts, setPosts] = useState<Post[]>([]);
+  const [liveStreams, setLiveStreams] = useState<LiveStream[]>([]);
   const [loading, setLoading] = useState(true);
   const [caption, setCaption] = useState('');
   const [visibility, setVisibility] = useState<'public' | 'followers' | 'private'>('public');
@@ -32,7 +52,28 @@ export default function Feed({ setActivePage }: { setActivePage: (p: string) => 
   const [showLocation, setShowLocation] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { fetchFeed(); }, [user]);
+  useEffect(() => {
+    fetchFeed();
+    fetchLiveStreams();
+
+    const streamSub = supabase.channel('live_streams_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'live_streams' }, () => {
+        fetchLiveStreams();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(streamSub);
+    };
+  }, [user]);
+
+  const fetchLiveStreams = async () => {
+    const { data } = await supabase.from('live_streams')
+      .select('*, profiles:host_id(username, full_name, avatar_url, is_verified)')
+      .eq('status', 'live')
+      .order('created_at', { ascending: false });
+    if (data) setLiveStreams(data as any);
+  };
 
   const fetchFeed = async () => {
     setLoading(true);
@@ -89,7 +130,6 @@ export default function Feed({ setActivePage }: { setActivePage: (p: string) => 
 
     if (error) { showToast('Failed to post: ' + error.message, 'error'); }
     else {
-      await supabase.from('profiles').update({ posts_count: (profile?.posts_count || 0) + 1 }).eq('id', user.id);
       await refreshProfile();
       setCaption(''); clearMedia(); setLocation(''); setShowLocation(false);
       showToast('Post published! 🚀');
@@ -123,6 +163,120 @@ export default function Feed({ setActivePage }: { setActivePage: (p: string) => 
           </div>
         </div>
       )}
+
+      {/* Live Streams Carousel */}
+      <div style={{
+        padding: '16px 20px',
+        marginBottom: 16,
+        background: 'var(--glass-bg)',
+        border: '1px solid var(--glass-border)',
+        borderRadius: 'var(--border-radius-lg)',
+        backdropFilter: 'var(--glass-blur)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Radio size={16} color="var(--neon-pink)" style={{ animation: 'bgPulse 1.5s ease-in-out infinite alternate' }} />
+          <span style={{ fontWeight: 800, fontSize: '0.85rem', letterSpacing: 0.5, textTransform: 'uppercase', color: 'var(--text-primary)' }}>Live Streams</span>
+        </div>
+        <div style={{
+          display: 'flex',
+          gap: 16,
+          overflowX: 'auto',
+          paddingBottom: 4,
+          alignItems: 'center',
+        }} className="no-scrollbar">
+          {/* Go Live button for Broadcaster */}
+          {isLive && (
+            <div
+              onClick={onStartLive}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 6,
+                cursor: 'pointer',
+                flexShrink: 0,
+              }}
+            >
+              <div style={{
+                width: 56, height: 56,
+                borderRadius: '50%',
+                background: 'linear-gradient(135deg, #a78bfa, #7c3aed)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 0 16px rgba(167, 139, 250, 0.4)',
+                border: '3px solid var(--bg-primary)',
+              }}>
+                <Video size={20} color="white" />
+              </div>
+              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#a78bfa' }}>Go Live</span>
+            </div>
+          )}
+
+          {/* Active streams */}
+          {liveStreams.map(stream => {
+            const sp = stream.profiles;
+            const initials = sp?.full_name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || sp?.username?.[0]?.toUpperCase() || '?';
+            return (
+              <div
+                key={stream.id}
+                onClick={() => onWatchLive(stream.id, stream.title, stream.host_id)}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 6,
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                }}
+              >
+                <div style={{
+                  position: 'relative',
+                  width: 56, height: 56,
+                  borderRadius: '50%',
+                  padding: 2,
+                  background: 'linear-gradient(135deg, #ff6b6b, #d946ef)',
+                  boxShadow: '0 0 16px rgba(255, 107, 107, 0.3)',
+                  animation: 'bgPulse 1.5s ease-in-out infinite alternate',
+                }}>
+                  <div style={{
+                    width: '100%', height: '100%',
+                    borderRadius: '50%',
+                    background: 'var(--bg-primary)',
+                    padding: 2,
+                  }}>
+                    {sp?.avatar_url ? (
+                      <img src={sp.avatar_url} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} alt={sp.username} />
+                    ) : (
+                      <div className="avatar-placeholder" style={{ width: '100%', height: '100%', fontSize: '0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {initials}
+                      </div>
+                    )}
+                  </div>
+                  <span style={{
+                    position: 'absolute', bottom: -2, right: -2,
+                    background: 'var(--coral, #ff6b6b)', color: 'white',
+                    fontSize: '0.55rem', fontWeight: 900, padding: '1px 4px',
+                    borderRadius: 4, border: '1px solid var(--bg-primary)',
+                  }}>LIVE</span>
+                </div>
+                <span className="truncate" style={{ fontSize: '0.72rem', maxWidth: 64, textAlign: 'center', fontWeight: 600 }}>
+                  {sp?.username}
+                </span>
+              </div>
+            );
+          })}
+
+          {liveStreams.length === 0 && !isLive && (
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', padding: '8px 0' }}>
+              No active broadcasts right now.
+            </p>
+          )}
+        </div>
+      </div>
 
       {/* Create Post - paywall for free users */}
       {!isActive ? (

@@ -15,6 +15,7 @@ import AdminPanel from './AdminPanel';
 import SettingsPage from './SettingsPage';
 import FollowersList from './FollowersList';
 import { useToast } from '../context/ToastContext';
+import LiveStreamModal from './LiveStreamModal';
 
 
 export default function Dashboard() {
@@ -25,6 +26,20 @@ export default function Dashboard() {
   const [unreadNotifs, setUnreadNotifs] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [activeLiveStream, setActiveLiveStream] = useState<{
+    streamId?: string;
+    streamTitle?: string;
+    hostId?: string;
+    isHost: boolean;
+  } | null>(null);
+
+  const handleStartLiveStream = () => {
+    setActiveLiveStream({ isHost: true });
+  };
+
+  const handleWatchLiveStream = (streamId: string, streamTitle: string, hostId: string) => {
+    setActiveLiveStream({ streamId, streamTitle, hostId, isHost: false });
+  };
 
   // Suspended account check
   useEffect(() => {
@@ -83,7 +98,7 @@ export default function Dashboard() {
       // Still allow browsing but Feed/PostCard will block posting
     }
 
-    if (activePage === 'feed') return <Feed setActivePage={handleSetPage} />;
+    if (activePage === 'feed') return <Feed setActivePage={handleSetPage} onStartLive={handleStartLiveStream} onWatchLive={handleWatchLiveStream} />;
     if (activePage === 'explore') return <Explore setActivePage={handleSetPage} />;
     if (activePage === 'notifications') return <NotificationsPage setActivePage={handleSetPage} />;
     if (activePage === 'messages' || activePage.startsWith('messages:')) {
@@ -105,7 +120,7 @@ export default function Dashboard() {
       const [pageType, uid] = activePage.split(':');
       return <FollowersList userId={uid} type={pageType as 'followers' | 'following'} setActivePage={handleSetPage} />;
     }
-    return <Feed setActivePage={handleSetPage} />;
+    return <Feed setActivePage={handleSetPage} onStartLive={handleStartLiveStream} onWatchLive={handleWatchLiveStream} />;
 
   };
 
@@ -129,6 +144,16 @@ export default function Dashboard() {
         {renderPage()}
       </main>
       <RightPanel setActivePage={handleSetPage} />
+
+      {activeLiveStream && (
+        <LiveStreamModal
+          streamId={activeLiveStream.streamId}
+          streamTitle={activeLiveStream.streamTitle}
+          hostId={activeLiveStream.hostId}
+          isHost={activeLiveStream.isHost}
+          onClose={() => setActiveLiveStream(null)}
+        />
+      )}
     </div>
   );
 }

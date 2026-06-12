@@ -174,8 +174,15 @@ body,
   padding: 0;
 }
 
+/* Prevent mobile zoom on input focus (iOS Safari zooms when font-size < 16px) */
 html {
   scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Force all inputs to 16px to prevent iOS Safari auto-zoom */
+input, textarea, select {
+  font-size: 16px !important;
 }
 
 body {
@@ -429,7 +436,7 @@ h6 {
   border-radius: var(--border-radius-md);
   color: var(--text-primary);
   font-family: 'Inter', sans-serif;
-  font-size: 0.9rem;
+  font-size: 16px;
   padding: 12px 16px;
   outline: none;
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);

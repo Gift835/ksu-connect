@@ -12,7 +12,7 @@ interface Profile {
 interface Trend { tag: string; count: number; }
 
 export default function RightPanel({ setActivePage }: { setActivePage: (p: string) => void }) {
-  const { profile: me, user } = useAuth();
+  const { profile: me, user, refreshProfile } = useAuth();
   const { showToast } = useToast();
   const [suggestions, setSuggestions] = useState<Profile[]>([]);
   const [trends, setTrends] = useState<Trend[]>([]);
@@ -77,15 +77,21 @@ export default function RightPanel({ setActivePage }: { setActivePage: (p: strin
 
   const handleFollow = async (targetId: string) => {
     if (!user) return;
-    if (following.has(targetId)) {
-      await supabase.from('follows').delete()
-        .eq('follower_id', user.id).eq('following_id', targetId);
-      setFollowing(prev => { const s = new Set(prev); s.delete(targetId); return s; });
-      showToast('Unfollowed');
-    } else {
-      await supabase.from('follows').insert({ follower_id: user.id, following_id: targetId, status: 'accepted' });
-      setFollowing(prev => new Set([...prev, targetId]));
-      showToast('Following! 🎉');
+    try {
+      if (following.has(targetId)) {
+        await supabase.from('follows').delete()
+          .eq('follower_id', user.id).eq('following_id', targetId);
+        setFollowing(prev => { const s = new Set(prev); s.delete(targetId); return s; });
+        showToast('Unfollowed');
+      } else {
+        await supabase.from('follows').insert({ follower_id: user.id, following_id: targetId, status: 'accepted' });
+        setFollowing(prev => new Set([...prev, targetId]));
+        showToast('Following! 🎉');
+      }
+      await refreshProfile();
+      fetchSuggestions();
+    } catch (err) {
+      console.error('Right panel follow error:', err);
     }
   };
 

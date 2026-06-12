@@ -60,11 +60,9 @@ export default function PostCard({ post, onDelete, setActivePage }: PostCardProp
 
     if (liked) {
       await supabase.from('likes').delete().eq('user_id', user.id).eq('target_type', 'post').eq('target_id', post.id);
-      await supabase.from('posts').update({ likes_count: Math.max(0, likesCount - 1) }).eq('id', post.id);
       setLiked(false); setLikesCount(c => Math.max(0, c - 1));
     } else {
       await supabase.from('likes').insert({ user_id: user.id, target_type: 'post', target_id: post.id });
-      await supabase.from('posts').update({ likes_count: likesCount + 1 }).eq('id', post.id);
       setLiked(true); setLikesCount(c => c + 1);
       // Notify post owner
       if (user.id !== post.user_id) {
@@ -99,7 +97,6 @@ export default function PostCard({ post, onDelete, setActivePage }: PostCardProp
     if (inserted) {
       setComments(prev => [...prev, inserted as any]);
       setCommentsCount(c => c + 1);
-      await supabase.from('posts').update({ comments_count: commentsCount + 1 }).eq('id', post.id);
       if (user.id !== post.user_id) {
         await supabase.from('notifications').insert({
           user_id: post.user_id, sender_id: user.id, type: 'comment', target_id: post.id, is_read: false
