@@ -4,6 +4,7 @@ import { SubscriptionProvider } from './context/SubscriptionContext';
 import { SettingsProvider } from './context/SettingsContext';
 import LoginScreen from './components/LoginScreen';
 import Dashboard from './components/Dashboard';
+import InstallPrompt from './components/InstallPrompt';
 import './index.css';
 
 
@@ -50,6 +51,7 @@ export default function App() {
     <ToastProvider>
       <AuthProvider>
         <AppContent />
+        <InstallPrompt />
       </AuthProvider>
     </ToastProvider>
   );

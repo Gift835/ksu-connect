@@ -20,11 +20,15 @@ interface ChatMessage {
     timestamp: number;
 }
 
+// STUN + free TURN servers for mobile network relay
 const ICE_SERVERS = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
+        // Free TURN relay — works behind mobile carrier NAT
+        { urls: 'turn:openrelay.metered.ca:80',      username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443',     username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
     ]
 };
 
@@ -65,6 +69,8 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
     const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
     const singlePeerConnectionRef = useRef<RTCPeerConnection | null>(null);
     const localStreamRef = useRef<MediaStream | null>(null);
+    // Buffer ICE candidates that arrive before remote description is set
+    const pendingCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
 
     // Auto-scroll chat
     useEffect(() => {
@@ -248,11 +254,24 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                 const pc = peerConnectionsRef.current.get(senderId);
                 if (pc) {
                     await pc.setRemoteDescription(new RTCSessionDescription(answer));
+                    // Flush any buffered ICE candidates
+                    const pending = pendingCandidatesRef.current.get(senderId) || [];
+                    for (const c of pending) {
+                        try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
+                    }
+                    pendingCandidatesRef.current.delete(senderId);
                 }
             } else if (event === 'candidate') {
                 const pc = peerConnectionsRef.current.get(senderId);
-                if (pc && candidate) {
-                    await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                if (pc) {
+                    if (pc.remoteDescription) {
+                        try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
+                    } else {
+                        // Buffer until remote description is set
+                        const buf = pendingCandidatesRef.current.get(senderId) || [];
+                        buf.push(candidate);
+                        pendingCandidatesRef.current.set(senderId, buf);
+                    }
                 }
             }
         });
@@ -308,25 +327,55 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
             const pc = new RTCPeerConnection(ICE_SERVERS);
             singlePeerConnectionRef.current = pc;
 
+            // Buffer of ICE candidates that arrive before offer
+            let pendingViewerCandidates: RTCIceCandidateInit[] = [];
+            let remoteSet = false;
+
             const rStream = new MediaStream();
             setRemoteStream(rStream);
+
+            // Handle incoming tracks — fires when host sends video
             pc.ontrack = (e) => {
-                rStream.addTrack(e.track);
+                e.streams[0]?.getTracks().forEach(track => rStream.addTrack(track));
                 if (remoteVideoRef.current) {
-                    remoteVideoRef.current.srcObject = rStream;
+                    remoteVideoRef.current.srcObject = e.streams[0] || rStream;
+                }
+                setLoading(false);
+            };
+
+            // Handle ICE candidates going out to host
+            pc.onicecandidate = (e) => {
+                if (e.candidate && channelRef.current) {
+                    channelRef.current.send({
+                        type: 'broadcast',
+                        event: 'candidate',
+                        payload: {
+                            senderId: user!.id,
+                            targetId: propHostId!,
+                            candidate: e.candidate
+                        }
+                    });
+                }
+            };
+
+            pc.onconnectionstatechange = () => {
+                if (pc.connectionState === 'connected') setLoading(false);
+                if (pc.connectionState === 'failed') {
+                    showToast('Connection lost. Try rejoining.', 'error');
                 }
             };
 
             const channelName = `stream_signaling:${streamId}`;
             const chan = supabase.channel(channelName);
+            channelRef.current = chan;
 
             chan.on('broadcast', { event: '*' }, async ({ event, payload }) => {
-                const { senderId, targetId, offer, candidate, senderName, text } = payload;
+                const { targetId, offer, candidate, senderName, senderId: msgSender, text } = payload;
 
                 if (event === 'chat') {
                     const msg: ChatMessage = {
                         id: Math.random().toString(),
-                        senderId,
+                        senderId: msgSender,
                         senderName,
                         text,
                         timestamp: Date.now()
@@ -338,65 +387,75 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                 if (targetId !== user!.id) return;
 
                 if (event === 'offer') {
-                    await pc.setRemoteDescription(new RTCSessionDescription(offer));
-                    const sdpAnswer = await pc.createAnswer();
-                    await pc.setLocalDescription(sdpAnswer);
+                    try {
+                        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+                        remoteSet = true;
 
-                    chan.send({
-                        type: 'broadcast',
-                        event: 'answer',
-                        payload: {
-                            senderId: user!.id,
-                            targetId: propHostId!,
-                            answer: pc.localDescription
+                        // Flush buffered candidates
+                        for (const c of pendingViewerCandidates) {
+                            try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
                         }
-                    });
-                    setLoading(false);
-                } else if (event === 'candidate') {
-                    if (candidate) {
-                        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                        pendingViewerCandidates = [];
+
+                        const sdpAnswer = await pc.createAnswer();
+                        await pc.setLocalDescription(sdpAnswer);
+
+                        chan.send({
+                            type: 'broadcast',
+                            event: 'answer',
+                            payload: {
+                                senderId: user!.id,
+                                targetId: propHostId!,
+                                answer: pc.localDescription
+                            }
+                        });
+                    } catch (err) {
+                        console.error('Error handling offer:', err);
+                    }
+                } else if (event === 'candidate' && candidate) {
+                    if (remoteSet) {
+                        try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
+                    } else {
+                        pendingViewerCandidates.push(candidate);
                     }
                 }
             });
 
             chan.subscribe((status) => {
                 if (status === 'SUBSCRIBED') {
+                    // Signal host that we joined
                     chan.send({
                         type: 'broadcast',
                         event: 'join',
-                        payload: {
-                            senderId: user!.id,
-                            targetId: propHostId!
-                        }
+                        payload: { senderId: user!.id, targetId: propHostId! }
                     });
-
-                    pc.onicecandidate = (e) => {
-                        if (e.candidate) {
+                    // Re-ping after 2s in case host missed it
+                    setTimeout(() => {
+                        if (!remoteSet && chan) {
                             chan.send({
                                 type: 'broadcast',
-                                event: 'candidate',
-                                payload: {
-                                    senderId: user!.id,
-                                    targetId: propHostId!,
-                                    candidate: e.candidate
-                                }
+                                event: 'join',
+                                payload: { senderId: user!.id, targetId: propHostId! }
                             });
                         }
-                    };
+                    }, 2000);
                 }
             });
 
-            const dbSub = supabase.channel('stream_ended_check')
+            // Detect stream ending via DB
+            const dbSub = supabase.channel(`stream_ended_${streamId}`)
                 .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'live_streams', filter: `id=eq.${streamId}` },
                     (payload) => {
-                        if (payload.new.status === 'ended') {
+                        if ((payload.new as any).status === 'ended') {
                             showToast('The host has ended this live stream.', 'info');
                             onClose();
                         }
                     })
                 .subscribe();
 
-            channelRef.current = chan;
+            // Auto-timeout loading after 15s
+            setTimeout(() => setLoading(false), 15000);
+
         } catch (err: any) {
             console.error('Viewer setup failed', err);
             showToast('Failed to connect to stream', 'error');

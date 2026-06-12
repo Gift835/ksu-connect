@@ -56,14 +56,19 @@ export default function Feed({ setActivePage, onStartLive, onWatchLive }: {
     fetchFeed();
     fetchLiveStreams();
 
+    // Realtime updates for live streams
     const streamSub = supabase.channel('live_streams_changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'live_streams' }, () => {
         fetchLiveStreams();
       })
       .subscribe();
 
+    // Fallback poll every 30s in case realtime misses an update
+    const pollInterval = setInterval(fetchLiveStreams, 30000);
+
     return () => {
       supabase.removeChannel(streamSub);
+      clearInterval(pollInterval);
     };
   }, [user]);
 

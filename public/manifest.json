@@ -1,30 +1,44 @@
 {
     "name": "KSU Connect",
     "short_name": "KSU Connect",
-    "description": "The premier social media platform for the KSU community.",
+    "description": "The premier social media platform for the KSU community. Connect, share and thrive.",
     "start_url": "/",
+    "scope": "/",
     "display": "standalone",
-    "background_color": "#0b0b1a",
-    "theme_color": "#ff6b6b",
+    "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+    "background_color": "#0a0a0f",
+    "theme_color": "#6366f1",
     "orientation": "portrait-primary",
+    "lang": "en",
+    "categories": ["social", "education"],
+    "prefer_related_applications": false,
     "icons": [
         {
-            "src": "/icon-192.svg",
+            "src": "/ksu-logo.png",
             "sizes": "192x192",
-            "type": "image/svg+xml",
-            "purpose": "any maskable"
-        },
-        {
-            "src": "/icon-512.svg",
-            "sizes": "512x512",
-            "type": "image/svg+xml",
-            "purpose": "any maskable"
+            "type": "image/png",
+            "purpose": "any"
         },
         {
             "src": "/ksu-logo.png",
-            "sizes": "any",
+            "sizes": "512x512",
             "type": "image/png",
             "purpose": "any"
+        },
+        {
+            "src": "/ksu-logo.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        }
+    ],
+    "shortcuts": [
+        {
+            "name": "Feed",
+            "short_name": "Feed",
+            "description": "Open your campus feed",
+            "url": "/",
+            "icons": [{ "src": "/ksu-logo.png", "sizes": "96x96", "type": "image/png" }]
         }
     ]
 }
