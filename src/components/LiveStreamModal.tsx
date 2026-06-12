@@ -20,16 +20,22 @@ interface ChatMessage {
     timestamp: number;
 }
 
-// STUN + free TURN servers for mobile network relay
-const ICE_SERVERS = {
+// STUN + TURN servers — using valid URL formats (no query-string in turn: URI)
+const ICE_SERVERS: RTCConfiguration = {
     iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        // Free TURN relay — works behind mobile carrier NAT
-        { urls: 'turn:openrelay.metered.ca:80',      username: 'openrelayproject', credential: 'openrelayproject' },
-        { urls: 'turn:openrelay.metered.ca:443',     username: 'openrelayproject', credential: 'openrelayproject' },
-        { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-    ]
+        { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+        // TCP TURN relay — works behind strict mobile NAT
+        {
+            urls: [
+                'turn:openrelay.metered.ca:80',
+                'turn:openrelay.metered.ca:443',
+                'turns:openrelay.metered.ca:443',
+            ],
+            username: 'openrelayproject',
+            credential: 'openrelayproject',
+        },
+    ],
+    iceCandidatePoolSize: 10,
 };
 
 export default function LiveStreamModal({ streamId: propStreamId, streamTitle: propStreamTitle, hostId: propHostId, isHost, onClose }: LiveStreamModalProps) {
@@ -85,6 +91,14 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
             startCameraPreview();
         }
         return () => {
+            // When host closes the modal (X button), auto-end the stream in DB
+            if (isHost && streamId) {
+                supabase.from('live_streams')
+                    .update({ status: 'ended', ended_at: new Date().toISOString() })
+                    .eq('id', streamId)
+                    .eq('status', 'live') // only update if still live
+                    .then(() => {});
+            }
             cleanupConnections();
         };
     }, []);
@@ -331,20 +345,35 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                 .eq('id', streamId!)
                 .single();
 
-            if (error || !stream || stream.status === 'ended') {
-                showToast('This live stream has ended.', 'error');
+            if (error || !stream) {
+                showToast('Could not load stream info.', 'error');
+                onClose();
+                return;
+            }
+            if (stream.status === 'ended') {
+                showToast('This live stream has already ended.', 'info');
                 onClose();
                 return;
             }
 
-            const pc = new RTCPeerConnection(ICE_SERVERS);
+            // Create peer connection — wrap separately to catch any config errors
+            let pc: RTCPeerConnection;
+            try {
+                pc = new RTCPeerConnection(ICE_SERVERS);
+            } catch (pcErr: any) {
+                showToast('WebRTC not supported by this browser: ' + pcErr.message, 'error');
+                onClose();
+                return;
+            }
             singlePeerConnectionRef.current = pc;
 
-            // *** CRITICAL FIX: Tell WebRTC we want to RECEIVE video+audio ***
-            // Without this, setRemoteDescription ignores incoming media tracks
-            // because the peer connection has no transceivers configured.
-            pc.addTransceiver('video', { direction: 'recvonly' });
-            pc.addTransceiver('audio', { direction: 'recvonly' });
+            // Tell WebRTC we want to RECEIVE video+audio (critical for SDP negotiation)
+            try {
+                pc.addTransceiver('video', { direction: 'recvonly' });
+                pc.addTransceiver('audio', { direction: 'recvonly' });
+            } catch {
+                // Some older browsers don't support addTransceiver — continue anyway
+            }
 
             // Buffer of ICE candidates that arrive before offer
             let pendingViewerCandidates: RTCIceCandidateInit[] = [];
@@ -598,14 +627,17 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                     {/* Pre-stream Setup: Camera Preview */}
                     {isHost && !isBroadcasting && (
                         <div className="stream-setup">
-                            {/* Live camera preview fills behind */}
+                            {/* Live camera preview fills behind — mirrored like a selfie camera */}
                             <video
                                 ref={previewVideoRef}
                                 autoPlay
                                 playsInline
                                 muted
                                 className="stream-preview-video"
-                                style={{ display: cameraReady ? 'block' : 'none' }}
+                                style={{
+                                    display: cameraReady ? 'block' : 'none',
+                                    transform: 'scaleX(-1)',  /* mirror so host sees themselves naturally */
+                                }}
                             />
 
                             {/* Dark gradient overlay at bottom for controls */}
@@ -663,7 +695,7 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                         </div>
                     )}
 
-                    {/* Host broadcasting video */}
+                    {/* Host broadcasting video — mirrored for natural selfie feel */}
                     {isHost && isBroadcasting && (
                         <video
                             ref={localVideoRef}
@@ -671,6 +703,7 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                             playsInline
                             muted
                             className="stream-live-video"
+                            style={{ transform: 'scaleX(-1)' }}
                         />
                     )}
 
