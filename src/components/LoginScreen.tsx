@@ -643,7 +643,6 @@ const styles: Record<string, React.CSSProperties> = {
   layout: {
     display: 'grid',
     width: '100%',
-    minHeight: '100vh',
     minHeight: '100dvh' as any,
     position: 'relative',
     zIndex: 1,
