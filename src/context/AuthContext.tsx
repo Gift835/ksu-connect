@@ -55,6 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
+    // Restore session from storage immediately
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
@@ -62,11 +63,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) fetchProfile(session.user.id);
-      else setProfile(null);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // Only clear on explicit sign out — not on token refresh or visibility change
+      if (event === 'SIGNED_OUT') {
+        setSession(null);
+        setUser(null);
+        setProfile(null);
+      } else if (session) {
+        setSession(session);
+        setUser(session.user);
+        fetchProfile(session.user.id);
+      }
     });
 
     return () => subscription.unsubscribe();

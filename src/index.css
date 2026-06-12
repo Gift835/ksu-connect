@@ -2861,3 +2861,99 @@ textarea.input {
   }
 }
 
+/* ================================================================
+   FRAMER-MOTION LOGIN SCREEN — SUPPLEMENTAL CSS
+   (inline styles handle layout; CSS handles pseudo-states + keyframes)
+   ================================================================ */
+
+/* Spinner keyframes (used by inline animation: 'spin …') */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Input focus ring — can't be done in inline styles */
+.lm-input:focus {
+  outline: none;
+  border-color: #6366f1 !important;
+  background: #fafbff !important;
+  box-shadow: 0 0 0 3.5px rgba(99,102,241,0.15) !important;
+}
+
+/* Hover lift on stat cards */
+.lm-stat-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(99,102,241,0.25);
+  box-shadow: 0 8px 28px rgba(99,102,241,0.1);
+}
+
+/* ── Mobile: stack brand panel below form ── */
+@media (max-width: 840px) {
+  /* The login layout grid (set via inline style) needs override */
+  [data-login-layout] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Brand panel: hide on very small screens to keep form usable */
+  [data-login-brand] {
+    display: none !important;
+  }
+
+  /* Form panel: full width, lighter padding */
+  [data-login-form] {
+    padding: 28px 16px 40px !important;
+    background: linear-gradient(145deg, #f8f7ff, #fdf4ff) !important;
+  }
+}
+
+/* ── Force light-mode background regardless of system/app theme ── */
+[data-login-root] {
+  background: linear-gradient(145deg, #f8f7ff 0%, #fdf4ff 30%, #f0f9ff 60%, #fff7ed 100%) !important;
+  color-scheme: light;
+}
+
+/* ── Ensure login inputs look right even if dark CSS leaks in ── */
+[data-login-root] input {
+  background: #f8fafc !important;
+  color: #1e293b !important;
+  border-color: #e2e8f0 !important;
+  font-size: 16px !important;         /* prevent iOS zoom */
+  -webkit-appearance: none;
+}
+
+[data-login-root] input::placeholder {
+  color: #94a3b8 !important;
+}
+
+[data-login-root] input:focus {
+  border-color: #6366f1 !important;
+  background: #fafbff !important;
+  box-shadow: 0 0 0 3.5px rgba(99,102,241,0.15) !important;
+  outline: none !important;
+}
+
+/* ── Form card shadow + glass on mobile ── */
+@media (max-width: 520px) {
+  [data-login-root] [data-form-card] {
+    padding: 24px 20px 20px !important;
+    border-radius: 22px !important;
+  }
+
+  [data-login-root] h2 {
+    font-size: 1.4rem !important;
+  }
+
+  [data-login-root] [data-row2] {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ── Framer-motion brand panel floating shapes ── */
+[data-login-root] .lm-blob {
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(70px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+
