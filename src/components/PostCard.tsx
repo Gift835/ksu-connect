@@ -4,116 +4,128 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { Heart, MessageCircle, Share2, MoreHorizontal, Bookmark, BadgeCheck, Send, ChevronDown, ChevronUp, Trash2, X, Play } from 'lucide-react';
 
-// ── VideoPlayer: always playable, shows thumbnail when available ──
+// ── VideoPlayer: autoplay when in view, loop forever, tap to unmute ──
 function VideoPlayer({ src }: { src: string }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoRef  = useRef<HTMLVideoElement>(null);
+  const wrapRef   = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [poster, setPoster] = useState<string | undefined>(undefined);
-  const [playing, setPlaying] = useState(false);
+  const [poster,  setPoster]  = useState<string | undefined>(undefined);
+  const [muted,   setMuted]   = useState(true);
+  const [started, setStarted] = useState(false); // has the video started at least once?
 
-  // Try to capture first frame — wrapped in try/catch for CORS-blocked videos
+  // ── Capture first frame for the thumbnail (best-effort, CORS-safe) ──
   useEffect(() => {
-    const video = videoRef.current;
+    const video  = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
-
-    const handleSeeked = () => {
+    const onSeeked = () => {
       try {
-        canvas.width = video.videoWidth || 640;
+        canvas.width  = video.videoWidth  || 640;
         canvas.height = video.videoHeight || 360;
         const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-          if (dataUrl && dataUrl.length > 5000) setPoster(dataUrl);
+          const url = canvas.toDataURL('image/jpeg', 0.8);
+          if (url.length > 5000) setPoster(url);
         }
-      } catch (_) {
-        // CORS blocked — fall back to dark gradient overlay (still playable)
-      }
+      } catch (_) { /* CORS blocked – no thumbnail, still plays fine */ }
       video.currentTime = 0;
     };
-
-    const handleMeta = () => { try { video.currentTime = 0.5; } catch (_) {} };
-
-    video.addEventListener('loadedmetadata', handleMeta);
-    video.addEventListener('seeked', handleSeeked, { once: true });
+    const onMeta = () => { try { video.currentTime = 0.5; } catch (_) {} };
+    video.addEventListener('loadedmetadata', onMeta);
+    video.addEventListener('seeked', onSeeked, { once: true });
     return () => {
-      video.removeEventListener('loadedmetadata', handleMeta);
-      video.removeEventListener('seeked', handleSeeked);
+      video.removeEventListener('loadedmetadata', onMeta);
+      video.removeEventListener('seeked', onSeeked);
     };
   }, [src]);
 
-  const handlePlayClick = () => {
+  // ── Play when ≥50 % visible, pause when scrolled away ──
+  useEffect(() => {
+    const video = videoRef.current;
+    const wrap  = wrapRef.current;
+    if (!video || !wrap) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          video.play().then(() => setStarted(true)).catch(() => {});
+        } else {
+          video.pause();
+        }
+      },
+      { threshold: 0.5 },
+    );
+    observer.observe(wrap);
+    return () => observer.disconnect();
+  }, []);
+
+  const toggleMute = (e: React.MouseEvent) => {
+    e.stopPropagation();
     const video = videoRef.current;
     if (!video) return;
-    setPlaying(true);
-    // play() returns a promise — catch any browser autoplay block
-    video.play().catch(() => {
-      // If autoplay blocked, the controls will still let the user press play
-    });
+    video.muted = !video.muted;
+    setMuted(video.muted);
   };
 
   return (
-    <div style={{ position: 'relative', lineHeight: 0, background: '#111' }}>
-      {/* Hidden canvas for frame extraction */}
+    <div ref={wrapRef} style={{ position: 'relative', lineHeight: 0, background: '#111', overflow: 'hidden' }}>
+      {/* Hidden canvas for thumbnail */}
       <canvas ref={canvasRef} style={{ display: 'none' }} />
 
-      {/* ── Thumbnail / overlay (shown when NOT yet playing) ── */}
-      {!playing && (
-        <div onClick={handlePlayClick} style={{ cursor: 'pointer', position: 'relative' }}>
-          {/* Poster image if captured, otherwise dark gradient placeholder */}
-          {poster ? (
-            <img
-              src={poster}
-              alt="video preview"
-              style={{ width: '100%', maxHeight: 400, objectFit: 'cover', display: 'block' }}
-            />
-          ) : (
-            <div style={{
-              width: '100%', height: 260,
-              background: 'linear-gradient(135deg, #1a1a2e 0%, #0f3460 50%, #16213e 100%)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <span style={{ fontSize: '3rem', opacity: 0.35 }}>🎬</span>
-            </div>
-          )}
+      {/* Thumbnail shown only before the very first play */}
+      {!started && poster && (
+        <img
+          src={poster}
+          alt="video preview"
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 1 }}
+        />
+      )}
 
-          {/* Play button centred over thumbnail */}
-          <div style={{
-            position: 'absolute', inset: 0,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <div style={{
-              width: 68, height: 68, borderRadius: '50%',
-              background: 'rgba(0,0,0,0.60)',
-              border: '2.5px solid rgba(255,255,255,0.85)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              backdropFilter: 'blur(6px)',
-              boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
-            }}>
-              <Play size={28} color="white" fill="white" style={{ marginLeft: 3 }} />
-            </div>
-          </div>
+      {/* Fallback placeholder before first play and no poster */}
+      {!started && !poster && (
+        <div style={{
+          width: '100%', height: 260,
+          background: 'linear-gradient(135deg,#1a1a2e,#0f3460,#16213e)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <span style={{ fontSize: '3rem', opacity: 0.35 }}>🎬</span>
         </div>
       )}
 
-      {/* ── Actual video (hidden until play is pressed, always has controls) ── */}
+      {/* The actual video – autoplay + loop + muted (required by browsers) */}
       <video
         ref={videoRef}
         src={src}
-        controls
+        autoPlay
+        loop
+        muted
         playsInline
-        preload="metadata"
+        preload="auto"
         className="post-media"
-        style={{
-          maxHeight: 400, width: '100%', background: '#111',
-          display: playing ? 'block' : 'none',
-        }}
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
-        onEnded={() => setPlaying(false)}
+        style={{ maxHeight: 400, width: '100%', background: '#111', display: 'block' }}
+        onPlay={() => setStarted(true)}
         onError={e => { (e.target as HTMLVideoElement).parentElement!.style.display = 'none'; }}
       />
+
+      {/* Mute / Unmute pill — bottom-right corner */}
+      <button
+        onClick={toggleMute}
+        title={muted ? 'Tap to unmute' : 'Tap to mute'}
+        style={{
+          position: 'absolute', bottom: 10, right: 10, zIndex: 10,
+          display: 'flex', alignItems: 'center', gap: 5,
+          background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(8px)',
+          border: '1px solid rgba(255,255,255,0.25)',
+          borderRadius: 99, padding: '5px 12px',
+          color: 'white', fontSize: '0.75rem', fontWeight: 600,
+          cursor: 'pointer', transition: 'all 0.15s',
+          fontFamily: 'Inter, sans-serif',
+        }}
+      >
+        <span style={{ fontSize: '1rem' }}>{muted ? '🔇' : '🔊'}</span>
+        {muted ? 'Unmute' : 'Mute'}
+      </button>
     </div>
   );
 }
