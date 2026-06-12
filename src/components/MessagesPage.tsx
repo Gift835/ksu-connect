@@ -1,9 +1,157 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { Send, Search, MessageCircle, Users, ChevronLeft, Plus } from 'lucide-react';
+import { Send, Search, MessageCircle, Users, ChevronLeft, Plus, Smile, X } from 'lucide-react';
 
+// ─────────────────────────────────────────────
+// CUSTOM EMOJI KEYBOARD DATA
+// ─────────────────────────────────────────────
+const EMOJI_CATEGORIES = [
+  {
+    label: '⭐ KSU',
+    icon: '🎓',
+    emojis: [
+      '🎓','📚','✏️','🏫','📐','📏','🔬','🔭','📡','🏆',
+      '🥇','🎯','💡','🧠','📝','🗒️','📖','🖊️','📌','🏅',
+      '💪','🙌','👏','🤝','✨','🌟','⭐','💫','🔥','🚀',
+    ],
+  },
+  {
+    label: '😊 Faces',
+    icon: '😊',
+    emojis: [
+      '😀','😁','😂','🤣','😊','😍','🥰','😎','🤩','🥳',
+      '😜','🤪','😏','🤔','🤫','😐','😑','🙄','😒','😔',
+      '😢','😭','😤','😠','🤯','😱','🤗','🥺','😴','🤤',
+      '😋','🤭','😇','🥴','🤑','😈','👿','💀','🤡','👻',
+    ],
+  },
+  {
+    label: '❤️ Love',
+    icon: '❤️',
+    emojis: [
+      '❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💕',
+      '💞','💓','💗','💖','💘','💝','💟','❣️','💔','🔥',
+      '💯','✨','🌹','💐','🌷','🌸','🫶','🥰','😘','💋',
+    ],
+  },
+  {
+    label: '👋 Greet',
+    icon: '👋',
+    emojis: [
+      '👋','🤚','🖐️','✋','🖖','🤙','👌','🤌','🤏','✌️',
+      '🤞','🤟','🤘','👍','👎','👊','✊','🤛','🤜','🤝',
+      '🙏','💪','🦾','👏','🙌','🤲','👐','🤜','🫂','🫶',
+    ],
+  },
+  {
+    label: '🎉 Fun',
+    icon: '🎉',
+    emojis: [
+      '🎉','🎊','🎈','🎁','🎀','🎆','🎇','🧨','🎭','🎪',
+      '🎮','🕹️','🎲','🎯','🎳','🏆','🥇','🏅','🎵','🎶',
+      '🎸','🎤','🎧','💃','🕺','🥂','🍾','🎂','🍰','🧁',
+    ],
+  },
+  {
+    label: '😂 Memes',
+    icon: '💬',
+    emojis: [
+      '💀','☠️','🫡','🫠','🥲','🤌','💅','👀','🗿','😤',
+      '😵','🤡','🐐','📌','💯','🫶','🫵','🔔','📢','‼️',
+      '❓','❗','🚨','⚠️','🆘','💬','🗨️','🔊','📣','🎙️',
+    ],
+  },
+];
+
+// ─────────────────────────────────────────────
+// EMOJI PICKER PANEL
+// ─────────────────────────────────────────────
+function EmojiPicker({ onSelect, onClose }: { onSelect: (e: string) => void; onClose: () => void }) {
+  const [activeTab, setActiveTab] = useState(0);
+
+  return (
+    <div style={{
+      background: 'linear-gradient(180deg, #0f0f1a 0%, #0a0a0f 100%)',
+      borderTop: '1px solid rgba(255,255,255,0.1)',
+      display: 'flex', flexDirection: 'column',
+      userSelect: 'none',
+    }}>
+      {/* Category tabs */}
+      <div style={{
+        display: 'flex', gap: 0,
+        borderBottom: '1px solid rgba(255,255,255,0.08)',
+        overflowX: 'auto', scrollbarWidth: 'none',
+      }}>
+        {EMOJI_CATEGORIES.map((cat, i) => (
+          <button key={i} onClick={() => setActiveTab(i)} style={{
+            flex: '0 0 auto', padding: '10px 14px',
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            fontSize: '1.15rem', position: 'relative',
+            opacity: activeTab === i ? 1 : 0.5,
+            transition: 'opacity 0.15s',
+          }}>
+            {cat.icon}
+            {activeTab === i && (
+              <div style={{
+                position: 'absolute', bottom: 0, left: '50%', transform: 'translateX(-50%)',
+                width: 20, height: 2, borderRadius: 99,
+                background: 'linear-gradient(90deg,#3b82f6,#8b5cf6)',
+              }} />
+            )}
+          </button>
+        ))}
+        <button onClick={onClose} style={{
+          marginLeft: 'auto', padding: '10px 12px',
+          background: 'transparent', border: 'none', cursor: 'pointer',
+          color: 'rgba(255,255,255,0.4)', flexShrink: 0,
+        }}>
+          <X size={16} />
+        </button>
+      </div>
+
+      {/* Category label */}
+      <div style={{
+        padding: '6px 14px 2px',
+        fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.05em',
+        color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase',
+      }}>
+        {EMOJI_CATEGORIES[activeTab].label}
+      </div>
+
+      {/* Emoji grid */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(8,1fr)',
+        gap: 2, padding: '4px 8px 12px', overflowY: 'auto', maxHeight: 180,
+      }}>
+        {EMOJI_CATEGORIES[activeTab].emojis.map((em, i) => (
+          <button key={i} onClick={() => onSelect(em)} style={{
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            fontSize: '1.45rem', padding: '6px 0',
+            borderRadius: 10, lineHeight: 1,
+            transition: 'background 0.1s, transform 0.1s',
+          }}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.08)';
+              (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.2)';
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+              (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)';
+            }}
+          >
+            {em}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// TYPES
+// ─────────────────────────────────────────────
 interface Conversation {
   id: string; username: string; full_name: string | null;
   avatar_url: string | null; last_message: string; unread: number;
@@ -19,6 +167,9 @@ interface FriendProfile {
 
 type SidebarTab = 'chats' | 'friends';
 
+// ─────────────────────────────────────────────
+// MAIN COMPONENT
+// ─────────────────────────────────────────────
 export default function MessagesPage({ initialUserId, setActivePage }: { initialUserId?: string; setActivePage: (p: string) => void }) {
   const { user, profile } = useAuth();
   const { showToast } = useToast();
@@ -33,11 +184,38 @@ export default function MessagesPage({ initialUserId, setActivePage }: { initial
   const [friends, setFriends] = useState<FriendProfile[]>([]);
   const [friendsLoading, setFriendsLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [showEmoji, setShowEmoji] = useState(false);
+
+  // ── Keyboard viewport fix: keep input bar glued above the on-screen keyboard ──
+  const chatAreaRef = useRef<HTMLDivElement>(null);
+  const inputBarRef = useRef<HTMLFormElement>(null);
+
+  useEffect(() => {
+    const vv = (window as any).visualViewport as VisualViewport | undefined;
+    if (!vv) return;
+
+    const onResize = () => {
+      const bar = inputBarRef.current;
+      if (!bar) return;
+      // Distance from the bottom of the visual viewport to the bottom of the layout viewport
+      const offset = window.innerHeight - vv.height - vv.offsetTop;
+      bar.style.transform = `translateY(-${Math.max(0, offset)}px)`;
+      // Scroll messages to bottom
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    };
+
+    vv.addEventListener('resize', onResize);
+    vv.addEventListener('scroll', onResize);
+    return () => {
+      vv.removeEventListener('resize', onResize);
+      vv.removeEventListener('scroll', onResize);
+    };
+  }, []);
 
   useEffect(() => { if (user) fetchConversations(); }, [user]);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
-  // Real-time subscription for incoming messages
+  // Real-time incoming messages
   useEffect(() => {
     if (!user || !selectedUser) return;
     const channel = supabase.channel(`chat-${user.id}-${selectedUser.id}`)
@@ -66,11 +244,9 @@ export default function MessagesPage({ initialUserId, setActivePage }: { initial
     ])].filter(id => id !== user.id);
 
     let convos: Conversation[] = [];
-
     if (partnerIds.length) {
       const { data: profiles } = await supabase.from('profiles')
         .select('id,username,full_name,avatar_url').in('id', partnerIds);
-
       convos = await Promise.all((profiles || []).map(async p => {
         const { data: lastMsg } = await supabase.from('messages')
           .select('body').or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
@@ -79,36 +255,19 @@ export default function MessagesPage({ initialUserId, setActivePage }: { initial
         const { count } = await supabase.from('messages')
           .select('*', { count: 'exact', head: true })
           .eq('sender_id', p.id).eq('receiver_id', user.id).eq('is_read', false);
-        return {
-          id: p.id, username: p.username, full_name: p.full_name,
-          avatar_url: p.avatar_url, last_message: lastMsg?.body || '', unread: count || 0
-        };
+        return { id: p.id, username: p.username, full_name: p.full_name, avatar_url: p.avatar_url, last_message: lastMsg?.body || '', unread: count || 0 };
       }));
     }
-
     setConversations(convos);
 
-    // Handle initialUserId – open immediately whether or not there's a prior conversation
     if (initialUserId) {
       const found = convos.find(c => c.id === initialUserId);
-      if (found) {
-        openConversation(found);
-      } else {
-        // No prior conversation – fetch the profile and open a fresh chat
-        const { data: p } = await supabase.from('profiles')
-          .select('id,username,full_name,avatar_url')
-          .eq('id', initialUserId).single();
-        if (p) {
-          const freshConvo: Conversation = {
-            id: p.id, username: p.username, full_name: p.full_name,
-            avatar_url: p.avatar_url, last_message: '', unread: 0,
-          };
-          setSelectedUser(freshConvo);
-          setMessages([]);
-        }
+      if (found) { openConversation(found); }
+      else {
+        const { data: p } = await supabase.from('profiles').select('id,username,full_name,avatar_url').eq('id', initialUserId).single();
+        if (p) { setSelectedUser({ id: p.id, username: p.username, full_name: p.full_name, avatar_url: p.avatar_url, last_message: '', unread: 0 }); setMessages([]); }
       }
     }
-
     setLoading(false);
   };
 
@@ -118,10 +277,7 @@ export default function MessagesPage({ initialUserId, setActivePage }: { initial
     const { data } = await supabase.from('follows')
       .select('following_id, profiles!follows_following_id_fkey(id,username,full_name,avatar_url)')
       .eq('follower_id', user.id);
-    if (data) {
-      const list = data.map((d: any) => d.profiles).filter(Boolean);
-      setFriends(list);
-    }
+    if (data) setFriends(data.map((d: any) => d.profiles).filter(Boolean));
     setFriendsLoading(false);
   };
 
@@ -132,6 +288,7 @@ export default function MessagesPage({ initialUserId, setActivePage }: { initial
 
   const openConversation = async (conv: Conversation) => {
     setSelectedUser(conv);
+    setShowEmoji(false);
     await supabase.from('messages').update({ is_read: true }).eq('sender_id', conv.id).eq('receiver_id', user!.id);
     const { data } = await supabase.from('messages')
       .select('*')
@@ -144,14 +301,9 @@ export default function MessagesPage({ initialUserId, setActivePage }: { initial
 
   const openFriendChat = (friend: FriendProfile) => {
     const existing = conversations.find(c => c.id === friend.id);
-    if (existing) {
-      openConversation(existing);
-    } else {
-      const freshConvo: Conversation = {
-        id: friend.id, username: friend.username, full_name: friend.full_name,
-        avatar_url: friend.avatar_url, last_message: '', unread: 0,
-      };
-      setSelectedUser(freshConvo);
+    if (existing) { openConversation(existing); }
+    else {
+      setSelectedUser({ id: friend.id, username: friend.username, full_name: friend.full_name, avatar_url: friend.avatar_url, last_message: '', unread: 0 });
       setMessages([]);
       setTimeout(() => inputRef.current?.focus(), 100);
     }
@@ -163,22 +315,24 @@ export default function MessagesPage({ initialUserId, setActivePage }: { initial
     if (!user || !selectedUser || !newMsg.trim()) return;
     const body = newMsg.trim();
     setNewMsg('');
+    setShowEmoji(false);
     const { data, error } = await supabase.from('messages')
       .insert({ sender_id: user.id, receiver_id: selectedUser.id, body, is_read: false })
       .select().single();
     if (error) showToast('Failed to send message', 'error');
     else if (data) {
       setMessages(prev => [...prev, data]);
-      // Add to conversations list if new
-      if (!conversations.find(c => c.id === selectedUser.id)) {
+      if (!conversations.find(c => c.id === selectedUser.id))
         setConversations(prev => [{ ...selectedUser, last_message: body }, ...prev]);
-      } else {
+      else
         setConversations(prev => prev.map(c => c.id === selectedUser.id ? { ...c, last_message: body } : c));
-      }
     }
-    await supabase.from('notifications').insert({
-      user_id: selectedUser.id, sender_id: user.id, type: 'mention', target_id: null, is_read: false
-    });
+    await supabase.from('notifications').insert({ user_id: selectedUser.id, sender_id: user.id, type: 'mention', target_id: null, is_read: false });
+  };
+
+  const insertEmoji = (em: string) => {
+    setNewMsg(prev => prev + em);
+    inputRef.current?.focus();
   };
 
   const timeAgo = (date: string) => {
@@ -200,10 +354,17 @@ export default function MessagesPage({ initialUserId, setActivePage }: { initial
   const myInitials = profile?.full_name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || profile?.username?.[0]?.toUpperCase() || '?';
 
   return (
-    <div className="messages-layout" style={{ gap: 0, height: 'calc(100vh - var(--header-height) - 48px)', background: 'var(--glass-bg)', borderRadius: 'var(--border-radius-lg)', overflow: 'hidden', border: '1px solid var(--glass-border)' }}>
-      {/* Sidebar */}
-      <div className={`messages-sidebar${selectedUser ? '' : ' no-chat-selected'}`} style={{ borderRight: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column' }}>
-        {/* Header */}
+    <div className="messages-layout" style={{
+      gap: 0,
+      height: 'calc(100vh - var(--header-height) - 48px)',
+      background: 'var(--glass-bg)',
+      borderRadius: 'var(--border-radius-lg)',
+      overflow: 'hidden',
+      border: '1px solid var(--glass-border)',
+    }}>
+      {/* ── Sidebar ── */}
+      <div className={`messages-sidebar${selectedUser ? '' : ' no-chat-selected'}`}
+        style={{ borderRight: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '16px', borderBottom: '1px solid var(--glass-border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
             <MessageCircle size={18} color="var(--coral)" />
@@ -217,32 +378,20 @@ export default function MessagesPage({ initialUserId, setActivePage }: { initial
           </div>
           {/* Tab switcher */}
           <div style={{ display: 'flex', gap: 4, marginTop: 10 }}>
-            <button
-              onClick={() => handleSidebarTab('chats')}
-              style={{
-                flex: 1, padding: '6px 0', fontSize: '0.78rem', fontWeight: 600, borderRadius: 'var(--border-radius-md)',
-                border: 'none', cursor: 'pointer', transition: 'all 0.15s',
-                background: sidebarTab === 'chats' ? 'var(--coral)' : 'rgba(255,255,255,0.07)',
-                color: sidebarTab === 'chats' ? 'white' : 'var(--text-secondary)',
+            {(['chats', 'friends'] as SidebarTab[]).map(tab => (
+              <button key={tab} onClick={() => handleSidebarTab(tab)} style={{
+                flex: 1, padding: '6px 0', fontSize: '0.78rem', fontWeight: 600,
+                borderRadius: 'var(--border-radius-md)', border: 'none', cursor: 'pointer',
+                transition: 'all 0.15s',
+                background: sidebarTab === tab ? 'var(--coral)' : 'rgba(255,255,255,0.07)',
+                color: sidebarTab === tab ? 'white' : 'var(--text-secondary)',
               }}>
-              <MessageCircle size={12} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />
-              Chats
-            </button>
-            <button
-              onClick={() => handleSidebarTab('friends')}
-              style={{
-                flex: 1, padding: '6px 0', fontSize: '0.78rem', fontWeight: 600, borderRadius: 'var(--border-radius-md)',
-                border: 'none', cursor: 'pointer', transition: 'all 0.15s',
-                background: sidebarTab === 'friends' ? 'var(--coral)' : 'rgba(255,255,255,0.07)',
-                color: sidebarTab === 'friends' ? 'white' : 'var(--text-secondary)',
-              }}>
-              <Users size={12} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />
-              Friends
-            </button>
+                {tab === 'chats' ? <><MessageCircle size={12} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />Chats</> : <><Users size={12} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />Friends</>}
+              </button>
+            ))}
           </div>
         </div>
 
-        {/* Content */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {sidebarTab === 'chats' ? (
             loading ? (
@@ -254,15 +403,13 @@ export default function MessagesPage({ initialUserId, setActivePage }: { initial
                 <p style={{ marginTop: 4 }}>Go to <strong>Friends</strong> tab to start chatting</p>
               </div>
             ) : filteredConvos.map(c => (
-              <div key={c.id} onClick={() => openConversation(c)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', cursor: 'pointer',
-                  background: selectedUser?.id === c.id ? 'rgba(59,130,246,0.1)' : 'transparent',
-                  borderLeft: selectedUser?.id === c.id ? '3px solid var(--coral)' : '3px solid transparent',
-                  transition: 'background 0.15s',
-                }}>
-                {c.avatar_url
-                  ? <img src={c.avatar_url} className="avatar avatar-md" alt={c.username} />
+              <div key={c.id} onClick={() => openConversation(c)} style={{
+                display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', cursor: 'pointer',
+                background: selectedUser?.id === c.id ? 'rgba(59,130,246,0.1)' : 'transparent',
+                borderLeft: selectedUser?.id === c.id ? '3px solid var(--coral)' : '3px solid transparent',
+                transition: 'background 0.15s',
+              }}>
+                {c.avatar_url ? <img src={c.avatar_url} className="avatar avatar-md" alt={c.username} />
                   : <div className="avatar-placeholder avatar-md" style={{ fontSize: '0.9rem' }}>{c.username[0].toUpperCase()}</div>}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -285,25 +432,19 @@ export default function MessagesPage({ initialUserId, setActivePage }: { initial
                 <p style={{ marginTop: 4 }}>Follow people to see them here</p>
               </div>
             ) : filteredFriends.map(f => (
-              <div key={f.id} onClick={() => openFriendChat(f)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', cursor: 'pointer',
-                  transition: 'background 0.15s',
-                }}
+              <div key={f.id} onClick={() => openFriendChat(f)} style={{
+                display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', cursor: 'pointer', transition: 'background 0.15s',
+              }}
                 onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
               >
-                {f.avatar_url
-                  ? <img src={f.avatar_url} className="avatar avatar-md" alt={f.username} />
+                {f.avatar_url ? <img src={f.avatar_url} className="avatar avatar-md" alt={f.username} />
                   : <div className="avatar-placeholder avatar-md" style={{ fontSize: '0.9rem' }}>{f.username[0].toUpperCase()}</div>}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{f.full_name || f.username}</div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>@{f.username}</div>
                 </div>
-                <div style={{
-                  width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: 'rgba(59,130,246,0.15)', color: 'var(--coral)', flexShrink: 0,
-                }}>
+                <div style={{ width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(59,130,246,0.15)', color: 'var(--coral)', flexShrink: 0 }}>
                   <Plus size={14} />
                 </div>
               </div>
@@ -312,13 +453,13 @@ export default function MessagesPage({ initialUserId, setActivePage }: { initial
         </div>
       </div>
 
-      {/* Chat area */}
+      {/* ── Chat area ── */}
       {selectedUser ? (
-        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        <div ref={chatAreaRef} style={{ display: 'flex', flexDirection: 'column', minWidth: 0, position: 'relative' }}>
           {/* Chat header */}
-          <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(255,255,255,0.02)' }}>
+          <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(255,255,255,0.02)', flexShrink: 0 }}>
             <button className="btn btn-secondary btn-sm chat-back-btn" style={{ display: 'none', marginRight: 4, padding: '6px 10px' }}
-              onClick={() => setSelectedUser(null)}>
+              onClick={() => { setSelectedUser(null); setShowEmoji(false); }}>
               <ChevronLeft size={16} />
             </button>
             {selectedUser.avatar_url
@@ -332,7 +473,7 @@ export default function MessagesPage({ initialUserId, setActivePage }: { initial
               onClick={() => setActivePage(`profile:${selectedUser.id}`)}>View Profile</button>
           </div>
 
-          {/* Messages */}
+          {/* Messages scroll area */}
           <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 8 }}>
             {messages.length === 0 && (
               <div style={{ textAlign: 'center', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', flexDirection: 'column', gap: 12, paddingTop: 60 }}>
@@ -349,40 +490,77 @@ export default function MessagesPage({ initialUserId, setActivePage }: { initial
               const isMine = m.sender_id === user?.id;
               return (
                 <div key={m.id} style={{ display: 'flex', justifyContent: isMine ? 'flex-end' : 'flex-start', gap: 8, alignItems: 'flex-end' }}>
-                  {!isMine && (
-                    selectedUser.avatar_url
-                      ? <img src={selectedUser.avatar_url} className="avatar avatar-xs" alt={selectedUser.username} />
-                      : <div className="avatar-placeholder avatar-xs" style={{ fontSize: '0.6rem' }}>{selectedUser.username[0].toUpperCase()}</div>
-                  )}
+                  {!isMine && (selectedUser.avatar_url
+                    ? <img src={selectedUser.avatar_url} className="avatar avatar-xs" alt={selectedUser.username} />
+                    : <div className="avatar-placeholder avatar-xs" style={{ fontSize: '0.6rem' }}>{selectedUser.username[0].toUpperCase()}</div>)}
                   <div style={{ maxWidth: '70%' }}>
                     <div className={`chat-bubble ${isMine ? 'sent' : 'received'}`}>{m.body}</div>
                     <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 2, textAlign: isMine ? 'right' : 'left' }}>
                       {timeAgo(m.created_at)}
                     </div>
                   </div>
-                  {isMine && (
-                    profile?.avatar_url
-                      ? <img src={profile.avatar_url} className="avatar avatar-xs" alt="you" />
-                      : <div className="avatar-placeholder avatar-xs" style={{ fontSize: '0.6rem' }}>{myInitials}</div>
-                  )}
+                  {isMine && (profile?.avatar_url
+                    ? <img src={profile.avatar_url} className="avatar avatar-xs" alt="you" />
+                    : <div className="avatar-placeholder avatar-xs" style={{ fontSize: '0.6rem' }}>{myInitials}</div>)}
                 </div>
               );
             })}
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input */}
-          <form onSubmit={sendMessage} style={{ padding: '12px 20px', borderTop: '1px solid var(--glass-border)', display: 'flex', gap: 10, background: 'rgba(255,255,255,0.02)' }}>
+          {/* ── Custom emoji picker panel ── */}
+          {showEmoji && (
+            <EmojiPicker onSelect={insertEmoji} onClose={() => setShowEmoji(false)} />
+          )}
+
+          {/* ── Input bar – stuck above keyboard via visualViewport ── */}
+          <form ref={inputBarRef} onSubmit={sendMessage} style={{
+            padding: '10px 12px',
+            borderTop: '1px solid var(--glass-border)',
+            background: 'rgba(10,10,15,0.95)',
+            backdropFilter: 'blur(20px)',
+            display: 'flex', gap: 8, alignItems: 'center',
+            flexShrink: 0,
+            /* sticky transform applied via JS */
+            willChange: 'transform',
+            paddingBottom: 'env(safe-area-inset-bottom, 10px)',
+          }}>
+            {/* Emoji toggle button */}
+            <button type="button" onClick={() => { setShowEmoji(v => !v); }}
+              style={{
+                width: 40, height: 40, borderRadius: '50%', flexShrink: 0, border: 'none',
+                background: showEmoji ? 'var(--coral)' : 'rgba(255,255,255,0.08)',
+                color: showEmoji ? 'white' : 'var(--text-muted)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer', transition: 'all 0.15s', fontSize: '1.1rem',
+              }}>
+              <Smile size={18} />
+            </button>
+
+            {/* Text input */}
             <input
               ref={inputRef}
               className="input"
               placeholder={`Message ${selectedUser.full_name || '@' + selectedUser.username}…`}
               value={newMsg}
               onChange={e => setNewMsg(e.target.value)}
-              style={{ borderRadius: 'var(--border-radius-full)', flex: 1 }}
+              onFocus={() => setShowEmoji(false)}
+              style={{ borderRadius: 'var(--border-radius-full)', flex: 1, minWidth: 0 }}
             />
-            <button type="submit" className="btn btn-primary btn-icon" disabled={!newMsg.trim()}>
-              <Send size={18} />
+
+            {/* Send button */}
+            <button type="submit" disabled={!newMsg.trim()} style={{
+              width: 42, height: 42, borderRadius: '50%', flexShrink: 0, border: 'none',
+              background: newMsg.trim()
+                ? 'linear-gradient(135deg,var(--coral),var(--neon-purple))'
+                : 'rgba(255,255,255,0.08)',
+              color: newMsg.trim() ? 'white' : 'var(--text-muted)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: newMsg.trim() ? 'pointer' : 'default',
+              transition: 'all 0.2s',
+              boxShadow: newMsg.trim() ? '0 4px 20px rgba(59,130,246,0.4)' : 'none',
+            }}>
+              <Send size={17} />
             </button>
           </form>
         </div>

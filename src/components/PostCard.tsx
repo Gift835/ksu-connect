@@ -1,8 +1,105 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { Heart, MessageCircle, Share2, MoreHorizontal, Bookmark, BadgeCheck, Send, ChevronDown, ChevronUp, Trash2, X } from 'lucide-react';
+import { Heart, MessageCircle, Share2, MoreHorizontal, Bookmark, BadgeCheck, Send, ChevronDown, ChevronUp, Trash2, X, Play } from 'lucide-react';
+
+// ── VideoPlayer: shows first frame instead of black screen ──
+function VideoPlayer({ src }: { src: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [poster, setPoster] = useState<string | undefined>(undefined);
+  const [playing, setPlaying] = useState(false);
+
+  // Capture first frame as poster when metadata loads
+  const capturePoster = useCallback(() => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 360;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    // Only set if it's not a blank frame
+    if (dataUrl.length > 5000) setPoster(dataUrl);
+  }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const handleMeta = () => {
+      video.currentTime = 0.1; // seek to 0.1s to get a real frame
+    };
+    const handleSeeked = () => {
+      capturePoster();
+      video.currentTime = 0; // reset to start
+    };
+    video.addEventListener('loadedmetadata', handleMeta);
+    video.addEventListener('seeked', handleSeeked);
+    return () => {
+      video.removeEventListener('loadedmetadata', handleMeta);
+      video.removeEventListener('seeked', handleSeeked);
+    };
+  }, [src, capturePoster]);
+
+  return (
+    <div style={{ position: 'relative', background: '#000', lineHeight: 0 }}>
+      {/* Hidden canvas for frame extraction */}
+      <canvas ref={canvasRef} style={{ display: 'none' }} />
+
+      {/* Poster overlay shown before play */}
+      {poster && !playing && (
+        <>
+          <img
+            src={poster}
+            alt="video thumbnail"
+            style={{ width: '100%', maxHeight: 400, objectFit: 'cover', display: 'block' }}
+          />
+          <button
+            onClick={() => {
+              setPlaying(true);
+              videoRef.current?.play();
+            }}
+            style={{
+              position: 'absolute', inset: 0, margin: 'auto',
+              width: 64, height: 64, borderRadius: '50%',
+              background: 'rgba(0,0,0,0.65)',
+              border: '2px solid rgba(255,255,255,0.8)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', backdropFilter: 'blur(4px)',
+              transition: 'transform 0.15s, background 0.15s',
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.1)'; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)'; }}
+          >
+            <Play size={26} color="white" fill="white" />
+          </button>
+        </>
+      )}
+
+      {/* Actual video element */}
+      <video
+        ref={videoRef}
+        src={src}
+        controls={playing}
+        playsInline
+        preload="metadata"
+        className="post-media"
+        style={{
+          maxHeight: 400, width: '100%',
+          display: poster && !playing ? 'none' : 'block',
+          background: '#000',
+        }}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => setPlaying(false)}
+        onError={e => { (e.target as HTMLVideoElement).style.display = 'none'; }}
+      />
+    </div>
+  );
+}
 
 interface Post {
   id: string; user_id: string; caption: string | null;
@@ -288,17 +385,7 @@ export default function PostCard({ post, onDelete, setActivePage }: PostCardProp
         {post.media_urls?.length > 0 && (
           <div style={{ overflow: 'hidden' }}>
             {post.post_type === 'video'
-              ? (
-                <video
-                  src={post.media_urls[0]}
-                  controls
-                  playsInline
-                  preload="metadata"
-                  className="post-media"
-                  style={{ maxHeight: 400, width: '100%', background: '#000' }}
-                  onError={(e) => { (e.target as HTMLVideoElement).style.display = 'none'; }}
-                />
-              )
+              ? <VideoPlayer src={post.media_urls[0]} />
               : <img src={post.media_urls[0]} alt="post" className="post-media"
                 style={{ maxHeight: 500 }}
                 onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />}
