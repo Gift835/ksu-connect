@@ -3103,4 +3103,28 @@ textarea.input {
   }
 }
 
+/* ── Chat input bar: always dark, text always white ── */
+.chat-input-bar .input {
+  background: rgba(255, 255, 255, 0.10) !important;
+  color: rgba(255, 255, 255, 0.92) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+  caret-color: #3b82f6 !important;
+}
+.chat-input-bar .input::placeholder {
+  color: rgba(255, 255, 255, 0.38) !important;
+}
+.chat-input-bar .input:focus {
+  border-color: rgba(59, 130, 246, 0.6) !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15) !important;
+}
+
+/* Prevent iOS Safari body scroll that causes white gap under input */
+body.chat-open {
+  overflow: hidden;
+  position: fixed;
+  width: 100%;
+  top: 0;
+}
+
+
 

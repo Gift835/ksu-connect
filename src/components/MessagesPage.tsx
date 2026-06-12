@@ -201,11 +201,18 @@ export default function MessagesPage({ initialUserId, setActivePage }: { initial
     const onResize = () => {
       const el = layoutRef.current;
       if (!el) return;
-      // vv.height = visible area above keyboard
+
+      // Shrink container to match visible area above keyboard
       const newH = Math.floor(vv.height) - HEADER_H - MAIN_PAD;
       el.style.height = `${Math.max(200, newH)}px`;
-      // Scroll messages into view after resize settles
-      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'instant' }), 60);
+
+      // ✨ KEY FIX: iOS Safari scrolls the whole page up when the keyboard
+      // opens. Snap it back to the top so the header stays visible and the
+      // white gap below the input disappears.
+      window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
+
+      // Scroll messages to the latest message
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'instant' }), 80);
     };
 
     vv.addEventListener('resize', onResize);
@@ -214,6 +221,16 @@ export default function MessagesPage({ initialUserId, setActivePage }: { initial
 
   useEffect(() => { if (user) fetchConversations(); }, [user]);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+
+  // Lock body scroll on iOS when chat is open (prevents white gap from page bounce)
+  useEffect(() => {
+    if (selectedUser) {
+      document.body.classList.add('chat-open');
+    } else {
+      document.body.classList.remove('chat-open');
+    }
+    return () => document.body.classList.remove('chat-open');
+  }, [selectedUser]);
 
   // Real-time incoming messages
   useEffect(() => {
@@ -515,7 +532,7 @@ export default function MessagesPage({ initialUserId, setActivePage }: { initial
           )}
 
           {/* ── Input bar ── */}
-          <form ref={inputBarRef} onSubmit={sendMessage} style={{
+          <form ref={inputBarRef} className="chat-input-bar" onSubmit={sendMessage} style={{
             padding: '10px 12px',
             borderTop: '1px solid var(--glass-border)',
             background: 'rgba(10,10,15,0.97)',
@@ -536,7 +553,7 @@ export default function MessagesPage({ initialUserId, setActivePage }: { initial
               <Smile size={18} />
             </button>
 
-            {/* Text input */}
+            {/* Text input — always dark-themed since the bar is always dark */}
             <input
               ref={inputRef}
               className="input"
@@ -544,7 +561,17 @@ export default function MessagesPage({ initialUserId, setActivePage }: { initial
               value={newMsg}
               onChange={e => setNewMsg(e.target.value)}
               onFocus={() => setShowEmoji(false)}
-              style={{ borderRadius: 'var(--border-radius-full)', flex: 1, minWidth: 0 }}
+              style={{
+                borderRadius: 'var(--border-radius-full)',
+                flex: 1,
+                minWidth: 0,
+                /* Force dark-mode colours so text is always white
+                   regardless of the app light/dark theme             */
+                background: 'rgba(255,255,255,0.1)',
+                color: 'rgba(255,255,255,0.92)',
+                border: '1.5px solid rgba(255,255,255,0.15)',
+                caretColor: '#3b82f6',
+              }}
             />
 
             {/* Send button */}
