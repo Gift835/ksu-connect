@@ -219,82 +219,26 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
     }, [localStream, isBroadcasting]);
 
     const setupHostSignaling = (channelStreamId: string, media: MediaStream) => {
-        const channelName = `stream_signaling:${channelStreamId}`;
-        const chan = supabase.channel(channelName);
+        const broadcastChan = supabase.channel(`stream_bcast:${channelStreamId}`);
 
-        chan.on('broadcast', { event: '*' }, async ({ event, payload }) => {
-            const { senderId, targetId, offer, answer, candidate, senderName, text } = payload;
+        // Listen on Broadcast only for: chat messages + ICE candidates from viewers
+        broadcastChan.on('broadcast', { event: '*' }, async ({ event, payload }) => {
+            const { senderId, targetId, candidate, senderName, text } = payload;
 
             if (event === 'chat') {
-                const msg: ChatMessage = {
-                    id: Math.random().toString(),
-                    senderId,
-                    senderName,
-                    text,
-                    timestamp: Date.now()
-                };
-                setChatMessages(prev => [...prev, msg]);
+                setChatMessages(prev => [...prev, {
+                    id: Math.random().toString(), senderId, senderName, text, timestamp: Date.now()
+                }]);
                 return;
             }
 
-            if (targetId !== user!.id && event !== 'join') return;
-
-            if (event === 'join') {
-                console.log('Viewer joined:', senderId);
-                const pc = new RTCPeerConnection(ICE_SERVERS);
-                peerConnectionsRef.current.set(senderId, pc);
-
-                media.getTracks().forEach(track => {
-                    pc.addTrack(track, media);
-                });
-
-                pc.onicecandidate = (e) => {
-                    if (e.candidate) {
-                        chan.send({
-                            type: 'broadcast',
-                            event: 'candidate',
-                            payload: {
-                                senderId: user!.id,
-                                targetId: senderId,
-                                candidate: e.candidate
-                            }
-                        });
-                    }
-                };
-
-                const sdpOffer = await pc.createOffer();
-                await pc.setLocalDescription(sdpOffer);
-
-                chan.send({
-                    type: 'broadcast',
-                    event: 'offer',
-                    payload: {
-                        senderId: user!.id,
-                        targetId: senderId,
-                        offer: pc.localDescription
-                    }
-                });
-
-                setViewerCount(c => c + 1);
-                showToast(`👀 Someone joined your stream!`, 'info');
-            } else if (event === 'answer') {
+            // ICE candidates from viewers — fast path via Broadcast
+            if (event === 'candidate' && targetId === user!.id) {
                 const pc = peerConnectionsRef.current.get(senderId);
-                if (pc) {
-                    await pc.setRemoteDescription(new RTCSessionDescription(answer));
-                    // Flush any buffered ICE candidates
-                    const pending = pendingCandidatesRef.current.get(senderId) || [];
-                    for (const c of pending) {
-                        try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
-                    }
-                    pendingCandidatesRef.current.delete(senderId);
-                }
-            } else if (event === 'candidate') {
-                const pc = peerConnectionsRef.current.get(senderId);
-                if (pc) {
+                if (pc && candidate) {
                     if (pc.remoteDescription) {
                         try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
                     } else {
-                        // Buffer until remote description is set
                         const buf = pendingCandidatesRef.current.get(senderId) || [];
                         buf.push(candidate);
                         pendingCandidatesRef.current.set(senderId, buf);
@@ -303,13 +247,79 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
             }
         });
 
-        chan.subscribe((status) => {
-            if (status === 'SUBSCRIBED') {
-                console.log('Host subscribed to signaling channel');
-            }
-        });
+        broadcastChan.subscribe();
+        channelRef.current = broadcastChan;
 
-        channelRef.current = chan;
+        // *** DATABASE-BACKED SIGNALING — guaranteed delivery ***
+        // Watch for 'join' and 'answer' signals in the DB targeted at host
+        const sigChannel = supabase
+            .channel(`db_signals_host_${channelStreamId}`)
+            .on('postgres_changes', {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'stream_signals',
+                filter: `to_user_id=eq.${user!.id}`,
+            }, async ({ new: signal }: any) => {
+                if (signal.stream_id !== channelStreamId) return;
+
+                if (signal.type === 'join') {
+                    const viewerId = signal.from_user_id;
+                    if (peerConnectionsRef.current.has(viewerId)) return; // already connected
+
+                    console.log('DB signal: viewer joined', viewerId);
+                    const pc = new RTCPeerConnection(ICE_SERVERS);
+                    peerConnectionsRef.current.set(viewerId, pc);
+
+                    // Add all local tracks
+                    media.getTracks().forEach(track => pc.addTrack(track, media));
+
+                    // Send ICE candidates to viewer via Broadcast (fast)
+                    pc.onicecandidate = (e) => {
+                        if (e.candidate && channelRef.current) {
+                            channelRef.current.send({
+                                type: 'broadcast',
+                                event: 'candidate',
+                                payload: { senderId: user!.id, targetId: viewerId, candidate: e.candidate }
+                            });
+                        }
+                    };
+
+                    // Create and store offer in DB
+                    try {
+                        const sdpOffer = await pc.createOffer();
+                        await pc.setLocalDescription(sdpOffer);
+                        await supabase.from('stream_signals').insert({
+                            stream_id: channelStreamId,
+                            from_user_id: user!.id,
+                            to_user_id: viewerId,
+                            type: 'offer',
+                            payload: pc.localDescription,
+                        });
+                        setViewerCount(c => c + 1);
+                        showToast('👀 Someone joined your stream!', 'info');
+                    } catch (err) {
+                        console.error('Failed to create offer:', err);
+                    }
+
+                } else if (signal.type === 'answer') {
+                    const viewerId = signal.from_user_id;
+                    const pc = peerConnectionsRef.current.get(viewerId);
+                    if (pc && signal.payload) {
+                        try {
+                            await pc.setRemoteDescription(new RTCSessionDescription(signal.payload));
+                            // Flush buffered ICE candidates
+                            const pending = pendingCandidatesRef.current.get(viewerId) || [];
+                            for (const c of pending) {
+                                try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
+                            }
+                            pendingCandidatesRef.current.delete(viewerId);
+                        } catch (err) {
+                            console.error('Failed to set answer:', err);
+                        }
+                    }
+                }
+            })
+            .subscribe();
     };
 
     const stopStreaming = async () => {
@@ -341,148 +351,60 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
         setLoading(true);
         try {
             const { data: stream, error } = await supabase.from('live_streams')
-                .select('*')
-                .eq('id', streamId!)
-                .single();
+                .select('*').eq('id', streamId!).single();
 
-            if (error || !stream) {
-                showToast('Could not load stream info.', 'error');
-                onClose();
-                return;
-            }
-            if (stream.status === 'ended') {
-                showToast('This live stream has already ended.', 'info');
-                onClose();
-                return;
-            }
+            if (error || !stream) { showToast('Could not load stream.', 'error'); onClose(); return; }
+            if (stream.status === 'ended') { showToast('This live stream has already ended.', 'info'); onClose(); return; }
 
-            // Create peer connection — wrap separately to catch any config errors
+            // Create peer connection
             let pc: RTCPeerConnection;
-            try {
-                pc = new RTCPeerConnection(ICE_SERVERS);
-            } catch (pcErr: any) {
-                showToast('WebRTC not supported by this browser: ' + pcErr.message, 'error');
-                onClose();
-                return;
-            }
+            try { pc = new RTCPeerConnection(ICE_SERVERS); }
+            catch (pcErr: any) { showToast('WebRTC error: ' + pcErr.message, 'error'); onClose(); return; }
             singlePeerConnectionRef.current = pc;
 
-            // Tell WebRTC we want to RECEIVE video+audio (critical for SDP negotiation)
+            // Tell WebRTC we want to RECEIVE video+audio
             try {
                 pc.addTransceiver('video', { direction: 'recvonly' });
                 pc.addTransceiver('audio', { direction: 'recvonly' });
-            } catch {
-                // Some older browsers don't support addTransceiver — continue anyway
-            }
+            } catch { /* older browsers — continue */ }
 
-            // Buffer of ICE candidates that arrive before offer
             let pendingViewerCandidates: RTCIceCandidateInit[] = [];
             let remoteSet = false;
-            let tracksReceived = 0;
-
-            // Build the remote stream and update state so the useEffect attaches it
             const rStream = new MediaStream();
 
-            // Handle incoming tracks — fires once per track (audio + video separately)
+            // ontrack: fires when host's video/audio arrives
             pc.ontrack = (e) => {
-                tracksReceived++;
-                // Add this specific track to our stream
-                if (!rStream.getTrackById(e.track.id)) {
-                    rStream.addTrack(e.track);
-                }
-                // Update state so useEffect triggers video.srcObject assignment
+                if (!rStream.getTrackById(e.track.id)) rStream.addTrack(e.track);
                 setRemoteStream(new MediaStream(rStream.getTracks()));
                 setLoading(false);
             };
 
-            // Handle ICE candidates going out to host
-            pc.onicecandidate = (e) => {
-                if (e.candidate && channelRef.current) {
-                    channelRef.current.send({
-                        type: 'broadcast',
-                        event: 'candidate',
-                        payload: {
-                            senderId: user!.id,
-                            targetId: propHostId!,
-                            candidate: e.candidate
-                        }
-                    });
-                }
-            };
-
+            // ICE state tracking
             pc.oniceconnectionstatechange = () => {
-                if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
-                    setLoading(false);
-                }
-                // Try ICE restart on failure instead of giving up immediately
-                if (pc.iceConnectionState === 'failed') {
-                    try { pc.restartIce(); } catch {}
-                    showToast('Reconnecting stream...', 'info');
-                }
-                if (pc.iceConnectionState === 'disconnected') {
-                    setTimeout(() => {
-                        if (pc.iceConnectionState === 'disconnected') {
-                            try { pc.restartIce(); } catch {}
-                        }
-                    }, 3000);
-                }
+                if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') setLoading(false);
+                if (pc.iceConnectionState === 'failed') { try { pc.restartIce(); } catch {} }
             };
-
             pc.onconnectionstatechange = () => {
                 if (pc.connectionState === 'connected') setLoading(false);
-                if (pc.connectionState === 'failed') {
-                    showToast('Stream connection failed. Please close and rejoin.', 'error');
-                }
             };
 
-            const channelName = `stream_signaling:${streamId}`;
-            const chan = supabase.channel(channelName);
-            channelRef.current = chan;
+            // ─── BROADCAST CHANNEL ─── for chat + ICE candidates (fast path)
+            const bcastChan = supabase.channel(`stream_bcast:${streamId}`);
+            channelRef.current = bcastChan;
 
-            chan.on('broadcast', { event: '*' }, async ({ event, payload }) => {
-                const { targetId, offer, candidate, senderName, senderId: msgSender, text } = payload;
+            bcastChan.on('broadcast', { event: '*' }, async ({ event, payload }) => {
+                const { targetId, candidate, senderName, senderId: msgSender, text } = payload;
 
                 if (event === 'chat') {
-                    const msg: ChatMessage = {
-                        id: Math.random().toString(),
-                        senderId: msgSender,
-                        senderName,
-                        text,
-                        timestamp: Date.now()
-                    };
-                    setChatMessages(prev => [...prev, msg]);
+                    setChatMessages(prev => [...prev, {
+                        id: Math.random().toString(), senderId: msgSender,
+                        senderName, text, timestamp: Date.now()
+                    }]);
                     return;
                 }
 
-                if (targetId !== user!.id) return;
-
-                if (event === 'offer') {
-                    try {
-                        await pc.setRemoteDescription(new RTCSessionDescription(offer));
-                        remoteSet = true;
-
-                        // Flush buffered candidates
-                        for (const c of pendingViewerCandidates) {
-                            try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
-                        }
-                        pendingViewerCandidates = [];
-
-                        const sdpAnswer = await pc.createAnswer();
-                        await pc.setLocalDescription(sdpAnswer);
-
-                        chan.send({
-                            type: 'broadcast',
-                            event: 'answer',
-                            payload: {
-                                senderId: user!.id,
-                                targetId: propHostId!,
-                                answer: pc.localDescription
-                            }
-                        });
-                    } catch (err) {
-                        console.error('Error handling offer:', err);
-                    }
-                } else if (event === 'candidate' && candidate) {
+                // ICE candidates FROM HOST to this viewer
+                if (event === 'candidate' && targetId === user!.id && candidate) {
                     if (remoteSet) {
                         try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
                     } else {
@@ -491,29 +413,67 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                 }
             });
 
-            chan.subscribe((status) => {
-                if (status === 'SUBSCRIBED') {
-                    // Signal host that we joined
-                    chan.send({
-                        type: 'broadcast',
-                        event: 'join',
-                        payload: { senderId: user!.id, targetId: propHostId! }
+            // Send viewer ICE candidates to host via Broadcast
+            pc.onicecandidate = (e) => {
+                if (e.candidate && channelRef.current) {
+                    channelRef.current.send({
+                        type: 'broadcast', event: 'candidate',
+                        payload: { senderId: user!.id, targetId: propHostId!, candidate: e.candidate }
                     });
-                    // Re-ping after 2s in case host missed it
-                    setTimeout(() => {
-                        if (!remoteSet && chan) {
-                            chan.send({
-                                type: 'broadcast',
-                                event: 'join',
-                                payload: { senderId: user!.id, targetId: propHostId! }
-                            });
-                        }
-                    }, 2000);
                 }
-            });
+            };
 
-            // Detect stream ending via DB
-            const dbSub = supabase.channel(`stream_ended_${streamId}`)
+            bcastChan.subscribe();
+
+            // ─── DATABASE SIGNALING ─── for offer (guaranteed delivery)
+            const sigSub = supabase
+                .channel(`db_signals_viewer_${user!.id}_${streamId}`)
+                .on('postgres_changes', {
+                    event: 'INSERT', schema: 'public', table: 'stream_signals',
+                    filter: `to_user_id=eq.${user!.id}`,
+                }, async ({ new: signal }: any) => {
+                    if (signal.stream_id !== streamId || signal.type !== 'offer') return;
+
+                    try {
+                        await pc.setRemoteDescription(new RTCSessionDescription(signal.payload));
+                        remoteSet = true;
+
+                        // Flush buffered ICE candidates
+                        for (const c of pendingViewerCandidates) {
+                            try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
+                        }
+                        pendingViewerCandidates = [];
+
+                        const sdpAnswer = await pc.createAnswer();
+                        await pc.setLocalDescription(sdpAnswer);
+
+                        // Store answer in DB for host to pick up
+                        await supabase.from('stream_signals').insert({
+                            stream_id: streamId,
+                            from_user_id: user!.id,
+                            to_user_id: propHostId!,
+                            type: 'answer',
+                            payload: pc.localDescription,
+                        });
+                    } catch (err) {
+                        console.error('Error processing offer:', err);
+                    }
+                })
+                .subscribe(async (status) => {
+                    if (status === 'SUBSCRIBED') {
+                        // Send 'join' to host via DB — guaranteed delivery
+                        await supabase.from('stream_signals').insert({
+                            stream_id: streamId,
+                            from_user_id: user!.id,
+                            to_user_id: propHostId!,
+                            type: 'join',
+                            payload: null,
+                        });
+                    }
+                });
+
+            // Watch for stream ending
+            supabase.channel(`stream_ended_${streamId}`)
                 .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'live_streams', filter: `id=eq.${streamId}` },
                     (payload) => {
                         if ((payload.new as any).status === 'ended') {
@@ -523,12 +483,12 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                     })
                 .subscribe();
 
-            // Auto-timeout loading after 15s
-            setTimeout(() => setLoading(false), 15000);
+            // Auto-timeout loading spinner after 20s
+            setTimeout(() => setLoading(false), 20000);
 
         } catch (err: any) {
-            console.error('Viewer setup failed', err);
-            showToast('Failed to connect to stream', 'error');
+            console.error('Viewer setup failed:', err);
+            showToast('Failed to set up stream: ' + (err.message || err), 'error');
             onClose();
         }
     };
