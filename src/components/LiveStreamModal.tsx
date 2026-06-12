@@ -57,6 +57,8 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
     // Chat states
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
     const [messageText, setMessageText] = useState('');
+    const [chatOpen, setChatOpen] = useState(false); // mobile: chat collapsed by default
+    const [autoPlayBlocked, setAutoPlayBlocked] = useState(false);
 
     // Refs for video components
     const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -93,6 +95,17 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
             previewVideoRef.current.srcObject = previewStream;
         }
     }, [previewStream]);
+
+    // KEY FIX: Reliably attach remote stream to video element when it arrives
+    useEffect(() => {
+        if (!remoteStream || !remoteVideoRef.current) return;
+        const video = remoteVideoRef.current;
+        video.srcObject = remoteStream;
+        video.play().catch(() => {
+            // Browser blocked autoplay — show tap-to-play button
+            setAutoPlayBlocked(true);
+        });
+    }, [remoteStream]);
 
     const startCameraPreview = async () => {
         setPreviewLoading(true);
@@ -330,16 +343,20 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
             // Buffer of ICE candidates that arrive before offer
             let pendingViewerCandidates: RTCIceCandidateInit[] = [];
             let remoteSet = false;
+            let tracksReceived = 0;
 
+            // Build the remote stream and update state so the useEffect attaches it
             const rStream = new MediaStream();
-            setRemoteStream(rStream);
 
-            // Handle incoming tracks — fires when host sends video
+            // Handle incoming tracks — fires once per track (audio + video separately)
             pc.ontrack = (e) => {
-                e.streams[0]?.getTracks().forEach(track => rStream.addTrack(track));
-                if (remoteVideoRef.current) {
-                    remoteVideoRef.current.srcObject = e.streams[0] || rStream;
+                tracksReceived++;
+                // Add this specific track to our stream
+                if (!rStream.getTrackById(e.track.id)) {
+                    rStream.addTrack(e.track);
                 }
+                // Update state so useEffect triggers video.srcObject assignment
+                setRemoteStream(new MediaStream(rStream.getTracks()));
                 setLoading(false);
             };
 
@@ -358,10 +375,28 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                 }
             };
 
+            pc.oniceconnectionstatechange = () => {
+                if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+                    setLoading(false);
+                }
+                // Try ICE restart on failure instead of giving up immediately
+                if (pc.iceConnectionState === 'failed') {
+                    try { pc.restartIce(); } catch {}
+                    showToast('Reconnecting stream...', 'info');
+                }
+                if (pc.iceConnectionState === 'disconnected') {
+                    setTimeout(() => {
+                        if (pc.iceConnectionState === 'disconnected') {
+                            try { pc.restartIce(); } catch {}
+                        }
+                    }, 3000);
+                }
+            };
+
             pc.onconnectionstatechange = () => {
                 if (pc.connectionState === 'connected') setLoading(false);
                 if (pc.connectionState === 'failed') {
-                    showToast('Connection lost. Try rejoining.', 'error');
+                    showToast('Stream connection failed. Please close and rejoin.', 'error');
                 }
             };
 
@@ -642,6 +677,27 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                                 playsInline
                                 className="stream-live-video"
                             />
+                            {/* Tap-to-play overlay (iOS/some Android block autoplay) */}
+                            {autoPlayBlocked && (
+                                <div
+                                    className="stream-loading"
+                                    style={{ background: 'rgba(0,0,0,0.7)', cursor: 'pointer' }}
+                                    onClick={() => {
+                                        remoteVideoRef.current?.play();
+                                        setAutoPlayBlocked(false);
+                                    }}
+                                >
+                                    <div style={{
+                                        width: 64, height: 64, borderRadius: '50%',
+                                        background: 'rgba(255,255,255,0.15)',
+                                        border: '2px solid rgba(255,255,255,0.4)',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                    }}>
+                                        <span style={{ fontSize: '1.8rem' }}>▶️</span>
+                                    </div>
+                                    <p style={{ marginTop: 10 }}>Tap to play stream</p>
+                                </div>
+                            )}
                             {!remoteStream && !loading && (
                                 <div className="stream-loading" style={{ background: 'transparent' }}>
                                     <Eye size={28} style={{ opacity: 0.3 }} />
@@ -676,12 +732,13 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                 </div>
 
                 {/* ===== CHAT PANEL ===== */}
-                <div className="stream-chat-panel">
-                    <div className="stream-chat-header">
+                <div className={`stream-chat-panel ${chatOpen ? 'chat-open' : ''}`}>
+                    <div className="stream-chat-header" onClick={() => setChatOpen(!chatOpen)} style={{ cursor: 'pointer' }}>
                         <Radio size={14} style={{ color: '#a78bfa' }} />
-                        <span>Live Chat</span>
+                        <span>Live Chat {chatMessages.length > 0 && `(${chatMessages.length})`}</span>
+                        <span className="stream-chat-toggle">{chatOpen ? '▼' : '▲'}</span>
                         {isHost && isBroadcasting && (
-                            <span style={{ marginLeft: 'auto', fontSize: '0.72rem', color: 'rgba(255,255,255,0.5)', display: 'flex', alignItems: 'center', gap: 3 }}>
+                            <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.5)', display: 'flex', alignItems: 'center', gap: 3 }}>
                                 <Info size={10} /> Share you're live!
                             </span>
                         )}

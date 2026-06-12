@@ -2791,21 +2791,42 @@ textarea.input {
   .stream-container {
     /* Stack: video on top, chat below */
     grid-template-columns: 1fr;
-    grid-template-rows: 50vh 1fr;
+    grid-template-rows: 62vh 1fr;  /* video gets 62% of viewport height */
     max-height: 100dvh;
     height: 100dvh;
     border-radius: 0;
   }
 
   .stream-video-panel {
-    height: 50vh;
-    min-height: 200px;
+    height: 62vh;
+    min-height: 240px;
   }
 
   .stream-chat-panel {
     height: auto;
     border-left: none;
     border-top: 1px solid rgba(255,255,255,0.1);
+    max-height: 38vh;     /* chat can't take more than 38% */
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+  }
+
+  /* Chat collapsed on mobile by default — open when .chat-open */
+  .stream-chat-panel:not(.chat-open) .stream-chat-messages {
+    display: none;
+  }
+  .stream-chat-panel:not(.chat-open) .stream-chat-input-row {
+    display: none;
+  }
+
+  .stream-chat-header {
+    gap: 8px;
+  }
+
+  .stream-chat-toggle {
+    margin-left: auto;
+    font-size: 0.7rem;
+    opacity: 0.6;
   }
 
   .stream-setup-overlay {
@@ -2852,12 +2873,12 @@ textarea.input {
 
 @media (max-width: 480px) {
   .stream-container {
-    grid-template-rows: 45vw 1fr;
+    grid-template-rows: 58vh 1fr;
   }
 
   .stream-video-panel {
-    height: 45vw;
-    min-height: 180px;
+    height: 58vh;
+    min-height: 220px;
   }
 }
 
@@ -2918,6 +2939,7 @@ textarea.input {
   border-color: #e2e8f0 !important;
   font-size: 16px !important;         /* prevent iOS zoom */
   -webkit-appearance: none;
+  appearance: none;                   /* standard property for compatibility */
 }
 
 [data-login-root] input::placeholder {
