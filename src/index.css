@@ -3013,3 +3013,74 @@ textarea.input {
   from { opacity: 0; transform: translateY(40px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* ===== MESSAGES / CHAT UI ===== */
+.messages-layout {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  overflow: hidden;
+}
+
+.messages-sidebar {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Chat bubble base */
+.chat-bubble {
+  padding: 10px 14px;
+  border-radius: 18px;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  word-break: break-word;
+  display: inline-block;
+  max-width: 100%;
+  animation: bubbleFadeIn 0.18s ease;
+}
+
+@keyframes bubbleFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.chat-bubble.sent {
+  background: linear-gradient(135deg, var(--coral) 0%, var(--coral-dark) 100%);
+  color: white;
+  border-bottom-right-radius: 4px;
+  box-shadow: 0 2px 12px rgba(59, 130, 246, 0.25);
+}
+
+.chat-bubble.received {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  border: 1px solid var(--glass-border);
+  border-bottom-left-radius: 4px;
+}
+
+/* Mobile: show back button, collapse sidebar */
+@media (max-width: 640px) {
+  .messages-layout {
+    grid-template-columns: 1fr;
+    position: relative;
+  }
+
+  .messages-sidebar {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    background: var(--bg-secondary);
+    transition: transform 0.25s ease;
+  }
+
+  /* Hide sidebar when a chat is selected */
+  .messages-sidebar:not(.no-chat-selected) {
+    transform: translateX(-100%);
+    pointer-events: none;
+  }
+
+  .chat-back-btn {
+    display: inline-flex !important;
+  }
+}
+
