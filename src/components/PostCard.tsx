@@ -1,101 +1,118 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { Heart, MessageCircle, Share2, MoreHorizontal, Bookmark, BadgeCheck, Send, ChevronDown, ChevronUp, Trash2, X, Play } from 'lucide-react';
 
-// ── VideoPlayer: shows first frame instead of black screen ──
+// ── VideoPlayer: always playable, shows thumbnail when available ──
 function VideoPlayer({ src }: { src: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [poster, setPoster] = useState<string | undefined>(undefined);
   const [playing, setPlaying] = useState(false);
 
-  // Capture first frame as poster when metadata loads
-  const capturePoster = useCallback(() => {
+  // Try to capture first frame — wrapped in try/catch for CORS-blocked videos
+  useEffect(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 360;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-    // Only set if it's not a blank frame
-    if (dataUrl.length > 5000) setPoster(dataUrl);
-  }, []);
 
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    const handleMeta = () => {
-      video.currentTime = 0.1; // seek to 0.1s to get a real frame
-    };
     const handleSeeked = () => {
-      capturePoster();
-      video.currentTime = 0; // reset to start
+      try {
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 360;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+          if (dataUrl && dataUrl.length > 5000) setPoster(dataUrl);
+        }
+      } catch (_) {
+        // CORS blocked — fall back to dark gradient overlay (still playable)
+      }
+      video.currentTime = 0;
     };
+
+    const handleMeta = () => { try { video.currentTime = 0.5; } catch (_) {} };
+
     video.addEventListener('loadedmetadata', handleMeta);
-    video.addEventListener('seeked', handleSeeked);
+    video.addEventListener('seeked', handleSeeked, { once: true });
     return () => {
       video.removeEventListener('loadedmetadata', handleMeta);
       video.removeEventListener('seeked', handleSeeked);
     };
-  }, [src, capturePoster]);
+  }, [src]);
+
+  const handlePlayClick = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    setPlaying(true);
+    // play() returns a promise — catch any browser autoplay block
+    video.play().catch(() => {
+      // If autoplay blocked, the controls will still let the user press play
+    });
+  };
 
   return (
-    <div style={{ position: 'relative', background: '#000', lineHeight: 0 }}>
+    <div style={{ position: 'relative', lineHeight: 0, background: '#111' }}>
       {/* Hidden canvas for frame extraction */}
       <canvas ref={canvasRef} style={{ display: 'none' }} />
 
-      {/* Poster overlay shown before play */}
-      {poster && !playing && (
-        <>
-          <img
-            src={poster}
-            alt="video thumbnail"
-            style={{ width: '100%', maxHeight: 400, objectFit: 'cover', display: 'block' }}
-          />
-          <button
-            onClick={() => {
-              setPlaying(true);
-              videoRef.current?.play();
-            }}
-            style={{
-              position: 'absolute', inset: 0, margin: 'auto',
-              width: 64, height: 64, borderRadius: '50%',
-              background: 'rgba(0,0,0,0.65)',
-              border: '2px solid rgba(255,255,255,0.8)',
+      {/* ── Thumbnail / overlay (shown when NOT yet playing) ── */}
+      {!playing && (
+        <div onClick={handlePlayClick} style={{ cursor: 'pointer', position: 'relative' }}>
+          {/* Poster image if captured, otherwise dark gradient placeholder */}
+          {poster ? (
+            <img
+              src={poster}
+              alt="video preview"
+              style={{ width: '100%', maxHeight: 400, objectFit: 'cover', display: 'block' }}
+            />
+          ) : (
+            <div style={{
+              width: '100%', height: 260,
+              background: 'linear-gradient(135deg, #1a1a2e 0%, #0f3460 50%, #16213e 100%)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              cursor: 'pointer', backdropFilter: 'blur(4px)',
-              transition: 'transform 0.15s, background 0.15s',
-            }}
-            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.1)'; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)'; }}
-          >
-            <Play size={26} color="white" fill="white" />
-          </button>
-        </>
+            }}>
+              <span style={{ fontSize: '3rem', opacity: 0.35 }}>🎬</span>
+            </div>
+          )}
+
+          {/* Play button centred over thumbnail */}
+          <div style={{
+            position: 'absolute', inset: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <div style={{
+              width: 68, height: 68, borderRadius: '50%',
+              background: 'rgba(0,0,0,0.60)',
+              border: '2.5px solid rgba(255,255,255,0.85)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              backdropFilter: 'blur(6px)',
+              boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+            }}>
+              <Play size={28} color="white" fill="white" style={{ marginLeft: 3 }} />
+            </div>
+          </div>
+        </div>
       )}
 
-      {/* Actual video element */}
+      {/* ── Actual video (hidden until play is pressed, always has controls) ── */}
       <video
         ref={videoRef}
         src={src}
-        controls={playing}
+        controls
         playsInline
         preload="metadata"
         className="post-media"
         style={{
-          maxHeight: 400, width: '100%',
-          display: poster && !playing ? 'none' : 'block',
-          background: '#000',
+          maxHeight: 400, width: '100%', background: '#111',
+          display: playing ? 'block' : 'none',
         }}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onEnded={() => setPlaying(false)}
-        onError={e => { (e.target as HTMLVideoElement).style.display = 'none'; }}
+        onError={e => { (e.target as HTMLVideoElement).parentElement!.style.display = 'none'; }}
       />
     </div>
   );
