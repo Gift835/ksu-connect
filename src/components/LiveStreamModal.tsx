@@ -450,299 +450,215 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
     };
 
     return (
-        <div className="modal-overlay" style={{ background: 'rgba(0, 0, 0, 0.95)', zIndex: 999 }}>
-            <div className="live-stream-modal-grid" style={{
-                width: '100%',
-                maxWidth: 1000,
-                height: '90vh',
-                background: 'var(--bg-secondary)',
-                borderRadius: 'var(--border-radius-lg)',
-                border: '1px solid var(--glass-border)',
-                display: 'grid',
-                gridTemplateColumns: '1fr 320px',
-                overflow: 'hidden',
-                boxShadow: 'var(--shadow-card)',
-                position: 'relative'
-            }}>
-                {/* Close Button */}
-                <button
-                    onClick={isHost ? stopStreaming : onClose}
-                    style={{
-                        position: 'absolute', top: 12, left: 12,
-                        background: 'rgba(0,0,0,0.6)', border: '1px solid var(--glass-border)',
-                        color: 'white', cursor: 'pointer', borderRadius: '50%',
-                        width: 32, height: 32, display: 'flex', alignItems: 'center',
-                        justifyContent: 'center', zIndex: 50
-                    }}
-                >
-                    <X size={16} />
-                </button>
+        <div className="stream-overlay">
+            {/* ---- Main Container ---- */}
+            <div className="stream-container">
 
-                {/* Left side: Video Area */}
-                <div style={{ background: '#000', display: 'flex', flexDirection: 'column', justifyContent: 'center', position: 'relative', overflow: 'hidden' }}>
-                    {/* Pulsing Live indicator */}
-                    {isBroadcasting && (
-                        <div style={{
-                            position: 'absolute', top: 16, right: 16, display: 'flex', alignItems: 'center', gap: 6,
-                            background: 'rgba(255, 107, 107, 0.2)', border: '1px solid rgba(255,107,107,0.4)',
-                            padding: '4px 10px', borderRadius: 999, zIndex: 10
-                        }}>
-                            <span style={{ width: 8, height: 8, background: '#ff6b6b', borderRadius: '50%', display: 'inline-block', animation: 'bgPulse 1s ease-in-out infinite alternate' }} />
-                            <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#ff6b6b', letterSpacing: 0.5 }}>LIVE</span>
-                            {isHost && (
-                                <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.7)', marginLeft: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
-                                    <Users size={12} /> {viewerCount}
-                                </span>
-                            )}
-                        </div>
-                    )}
+                {/* ===== VIDEO PANEL ===== */}
+                <div className="stream-video-panel">
+                    {/* Top bar: LIVE badge + Close */}
+                    <div className="stream-top-bar">
+                        <button className="stream-close-btn" onClick={isHost ? stopStreaming : onClose}>
+                            <X size={18} />
+                        </button>
 
+                        {isBroadcasting && (
+                            <div className="stream-live-badge">
+                                <span className="stream-live-dot" />
+                                <span>LIVE</span>
+                                {isHost && (
+                                    <span className="stream-viewers">
+                                        <Users size={11} /> {viewerCount}
+                                    </span>
+                                )}
+                            </div>
+                        )}
+
+                        {!isBroadcasting && isHost && (
+                            <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: '0.85rem', fontWeight: 600 }}>
+                                Live Setup
+                            </div>
+                        )}
+
+                        {!isHost && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'rgba(255,255,255,0.7)', fontSize: '0.8rem' }}>
+                                <Eye size={13} /> Watching live
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Loading overlay */}
                     {loading && (
-                        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 20 }}>
-                            <div className="spinner" style={{ width: 44, height: 44, borderWidth: 3 }} />
-                            <p style={{ marginTop: 16, fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-                                {isHost ? 'Starting your broadcast...' : 'Connecting to broadcast...'}
-                            </p>
+                        <div className="stream-loading">
+                            <div className="spinner" style={{ width: 40, height: 40, borderWidth: 3 }} />
+                            <p>{isHost ? 'Starting your broadcast...' : 'Connecting to broadcast...'}</p>
                         </div>
                     )}
 
-                    {/* Pre-stream Setup for Host — Camera Preview */}
+                    {/* Pre-stream Setup: Camera Preview */}
                     {isHost && !isBroadcasting && (
-                        <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
-                            {/* Camera Preview Video */}
+                        <div className="stream-setup">
+                            {/* Live camera preview fills behind */}
                             <video
                                 ref={previewVideoRef}
                                 autoPlay
                                 playsInline
                                 muted
-                                style={{
-                                    position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
-                                    objectFit: 'cover', display: cameraReady ? 'block' : 'none'
-                                }}
+                                className="stream-preview-video"
+                                style={{ display: cameraReady ? 'block' : 'none' }}
                             />
 
-                            {/* Overlay Setup UI */}
-                            <div style={{
-                                position: 'absolute', bottom: 0, left: 0, right: 0,
-                                background: 'linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.6) 60%, transparent 100%)',
-                                padding: '40px 32px 24px',
-                                zIndex: 10,
-                                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12
-                            }}>
+                            {/* Dark gradient overlay at bottom for controls */}
+                            <div className="stream-setup-overlay">
                                 {previewLoading && (
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'rgba(255,255,255,0.7)', fontSize: '0.85rem' }}>
-                                        <div className="spinner" style={{ width: 18, height: 18, borderWidth: 2 }} />
-                                        Accessing camera...
+                                    <div className="stream-cam-status">
+                                        <div className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />
+                                        <span>Accessing camera...</span>
                                     </div>
                                 )}
 
                                 {!cameraReady && !previewLoading && (
-                                    <div style={{ textAlign: 'center', marginBottom: 8 }}>
-                                        <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'linear-gradient(135deg, #a78bfa, #7c3aed)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
-                                            <Radio size={32} color="white" />
+                                    <div style={{ textAlign: 'center' }}>
+                                        <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'linear-gradient(135deg, #a78bfa, #7c3aed)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 10px' }}>
+                                            <Radio size={24} color="white" />
                                         </div>
-                                        <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.85rem' }}>Camera not available. Check permissions.</p>
-                                        <button
-                                            onClick={startCameraPreview}
-                                            className="btn btn-sm"
-                                            style={{ marginTop: 10, background: 'rgba(167,139,250,0.3)', color: 'white' }}
-                                        >
-                                            Retry Camera Access
+                                        <p style={{ color: 'rgba(255,255,255,0.75)', fontSize: '0.82rem', marginBottom: 10 }}>
+                                            Camera not available. Check permissions.
+                                        </p>
+                                        <button onClick={startCameraPreview} className="btn btn-sm" style={{ background: 'rgba(167,139,250,0.35)', color: 'white' }}>
+                                            Retry Camera
                                         </button>
                                     </div>
                                 )}
 
                                 {cameraReady && (
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(34,197,94,0.2)', border: '1px solid rgba(34,197,94,0.4)', padding: '4px 12px', borderRadius: 999 }}>
-                                        <span style={{ width: 6, height: 6, background: '#22c55e', borderRadius: '50%' }} />
-                                        <span style={{ color: '#22c55e', fontSize: '0.75rem', fontWeight: 700 }}>Camera Ready</span>
+                                    <div className="stream-cam-ready">
+                                        <span className="stream-cam-dot" />
+                                        <span>Camera Ready</span>
                                     </div>
                                 )}
 
-                                {/* Stream Title Input — clearly visible */}
+                                {/* Title input */}
                                 <input
+                                    className="stream-title-input"
                                     placeholder="Enter stream title..."
                                     value={title}
                                     onChange={e => setTitle(e.target.value)}
-                                    style={{
-                                        width: '100%',
-                                        maxWidth: 400,
-                                        background: 'rgba(255,255,255,0.15)',
-                                        border: '1px solid rgba(255,255,255,0.4)',
-                                        borderRadius: 12,
-                                        padding: '12px 16px',
-                                        color: '#ffffff',
-                                        fontSize: '1rem',
-                                        fontWeight: 600,
-                                        outline: 'none',
-                                        backdropFilter: 'blur(8px)',
-                                        fontFamily: 'Inter, sans-serif',
-                                        caretColor: '#a78bfa',
-                                    }}
-                                    onFocus={e => { e.target.style.borderColor = '#a78bfa'; e.target.style.background = 'rgba(167,139,250,0.2)'; }}
-                                    onBlur={e => { e.target.style.borderColor = 'rgba(255,255,255,0.4)'; e.target.style.background = 'rgba(255,255,255,0.15)'; }}
+                                    maxLength={80}
                                 />
 
-                                {/* Viewer join info */}
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'rgba(255,255,255,0.6)', fontSize: '0.78rem' }}>
-                                    <Info size={12} />
-                                    Your followers can join this stream from their feed
+                                <div className="stream-info-hint">
+                                    <Info size={11} />
+                                    <span>Followers can join from their feed</span>
                                 </div>
 
                                 <button
-                                    className="btn"
-                                    style={{
-                                        background: 'linear-gradient(135deg, #a78bfa, #7c3aed)',
-                                        color: 'white', fontWeight: 700, fontSize: '1rem',
-                                        padding: '12px 36px', borderRadius: 999,
-                                        boxShadow: '0 4px 20px rgba(167,139,250,0.5)',
-                                    }}
+                                    className="stream-go-live-btn"
                                     onClick={startStreaming}
                                     disabled={!title.trim()}
                                 >
-                                    <Radio size={16} style={{ marginRight: 8 }} /> Go Live Now
+                                    <Radio size={15} /> Go Live Now
                                 </button>
                             </div>
                         </div>
                     )}
 
-                    {/* Live Video Player (Host broadcasting) */}
+                    {/* Host broadcasting video */}
                     {isHost && isBroadcasting && (
                         <video
                             ref={localVideoRef}
                             autoPlay
                             playsInline
                             muted
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            className="stream-live-video"
                         />
                     )}
 
-                    {/* Viewer Video */}
+                    {/* Viewer remote video */}
                     {!isHost && streamId && (
                         <div style={{ position: 'relative', width: '100%', height: '100%' }}>
                             <video
                                 ref={remoteVideoRef}
                                 autoPlay
                                 playsInline
-                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                className="stream-live-video"
                             />
                             {!remoteStream && !loading && (
-                                <div style={{
-                                    position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
-                                    alignItems: 'center', justifyContent: 'center', gap: 8,
-                                    color: 'rgba(255,255,255,0.5)', fontSize: '0.85rem'
-                                }}>
-                                    <Eye size={32} style={{ opacity: 0.3 }} />
-                                    <p>Waiting for host to start video...</p>
+                                <div className="stream-loading" style={{ background: 'transparent' }}>
+                                    <Eye size={28} style={{ opacity: 0.3 }} />
+                                    <p>Waiting for host video...</p>
                                 </div>
                             )}
                         </div>
                     )}
 
-                    {/* Media Control bar (For Host while broadcasting) */}
+                    {/* Host controls while broadcasting */}
                     {isHost && isBroadcasting && (
-                        <div style={{
-                            position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)',
-                            display: 'flex', gap: 12, background: 'rgba(0, 0, 0, 0.75)',
-                            padding: '8px 16px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.1)',
-                            zIndex: 10
-                        }}>
+                        <div className="stream-controls">
                             <button
                                 onClick={toggleVideo}
-                                className="btn btn-icon btn-sm"
-                                style={{ background: videoEnabled ? 'rgba(255,255,255,0.1)' : 'rgba(239, 68, 68, 0.2)', color: videoEnabled ? 'white' : '#ef4444' }}
-                                title={videoEnabled ? 'Turn off camera' : 'Turn on camera'}
+                                className="stream-ctrl-btn"
+                                style={{ background: videoEnabled ? 'rgba(255,255,255,0.15)' : 'rgba(239,68,68,0.3)', color: videoEnabled ? 'white' : '#ef4444' }}
                             >
-                                {videoEnabled ? <Video size={16} /> : <VideoOff size={16} />}
+                                {videoEnabled ? <Video size={18} /> : <VideoOff size={18} />}
                             </button>
                             <button
                                 onClick={toggleAudio}
-                                className="btn btn-icon btn-sm"
-                                style={{ background: audioEnabled ? 'rgba(255,255,255,0.1)' : 'rgba(239, 68, 68, 0.2)', color: audioEnabled ? 'white' : '#ef4444' }}
-                                title={audioEnabled ? 'Mute mic' : 'Unmute mic'}
+                                className="stream-ctrl-btn"
+                                style={{ background: audioEnabled ? 'rgba(255,255,255,0.15)' : 'rgba(239,68,68,0.3)', color: audioEnabled ? 'white' : '#ef4444' }}
                             >
-                                {audioEnabled ? <Mic size={16} /> : <MicOff size={16} />}
+                                {audioEnabled ? <Mic size={18} /> : <MicOff size={18} />}
                             </button>
-                            <button
-                                onClick={stopStreaming}
-                                className="btn btn-danger btn-sm"
-                                style={{ padding: '6px 14px', fontSize: '0.8rem', fontWeight: 700 }}
-                            >
-                                End Broadcast
+                            <button onClick={stopStreaming} className="stream-end-btn">
+                                End
                             </button>
                         </div>
                     )}
                 </div>
 
-                {/* Right side: Chat Panel */}
-                <div style={{
-                    display: 'flex', flexDirection: 'column', height: '100%',
-                    borderLeft: '1px solid var(--glass-border)', background: 'rgba(15, 15, 26, 0.8)'
-                }}>
-                    {/* Chat Header */}
-                    <div style={{ padding: 16, borderBottom: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Radio size={16} style={{ color: '#a78bfa' }} />
-                        <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>Live Stream Chat</span>
-                        {!isHost && (
-                            <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                <Eye size={12} /> Watching live
+                {/* ===== CHAT PANEL ===== */}
+                <div className="stream-chat-panel">
+                    <div className="stream-chat-header">
+                        <Radio size={14} style={{ color: '#a78bfa' }} />
+                        <span>Live Chat</span>
+                        {isHost && isBroadcasting && (
+                            <span style={{ marginLeft: 'auto', fontSize: '0.72rem', color: 'rgba(255,255,255,0.5)', display: 'flex', alignItems: 'center', gap: 3 }}>
+                                <Info size={10} /> Share you're live!
                             </span>
                         )}
                     </div>
 
-                    {/* Viewer join info banner (host view) */}
-                    {isHost && isBroadcasting && (
-                        <div style={{
-                            margin: '8px 12px', padding: '8px 12px',
-                            background: 'rgba(167,139,250,0.1)', border: '1px solid rgba(167,139,250,0.3)',
-                            borderRadius: 10, fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)',
-                            display: 'flex', alignItems: 'center', gap: 6
-                        }}>
-                            <Info size={12} />
-                            Followers can join from their feed — share that you're live!
-                        </div>
-                    )}
-
-                    {/* Chat Scrollable Area */}
-                    <div style={{ flex: 1, padding: 16, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div className="stream-chat-messages">
                         {chatMessages.map(msg => (
-                            <div key={msg.id} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                                <span style={{
-                                    fontSize: '0.75rem', fontWeight: 800,
-                                    color: msg.senderId === propHostId || (isHost && msg.senderId === user!.id) ? '#a78bfa' : 'var(--neon-blue)'
+                            <div key={msg.id} className="stream-chat-msg">
+                                <span className="stream-chat-name" style={{
+                                    color: msg.senderId === propHostId || (isHost && msg.senderId === user!.id) ? '#a78bfa' : '#06b6d4'
                                 }}>
                                     @{msg.senderName}
                                 </span>
-                                <span style={{ fontSize: '0.85rem', color: 'var(--text-primary)', wordBreak: 'break-word', lineHeight: 1.4 }}>
-                                    {msg.text}
-                                </span>
+                                <span className="stream-chat-text">{msg.text}</span>
                             </div>
                         ))}
                         {chatMessages.length === 0 && (
-                            <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem', padding: '40px 0' }}>
-                                Welcome to chat! Say hello 👋
-                            </div>
+                            <div className="stream-chat-empty">Welcome to chat! Say hello 👋</div>
                         )}
                         <div ref={chatEndRef} />
                     </div>
 
-                    {/* Chat Input form */}
-                    <form onSubmit={sendChatMessage} style={{ padding: 12, borderTop: '1px solid var(--glass-border)', display: 'flex', gap: 6 }}>
+                    <form onSubmit={sendChatMessage} className="stream-chat-form">
                         <input
-                            className="input"
-                            placeholder="Send a comment..."
+                            className="stream-chat-input"
+                            placeholder="Send a message..."
                             value={messageText}
                             onChange={e => setMessageText(e.target.value)}
-                            style={{ flex: 1, height: 36, padding: '8px 12px', borderRadius: 999, fontSize: '0.82rem' }}
                             disabled={!isBroadcasting && isHost}
                         />
                         <button
                             type="submit"
-                            className="btn btn-primary btn-icon"
-                            style={{ width: 36, height: 36, flexShrink: 0 }}
+                            className="stream-chat-send"
                             disabled={(!isBroadcasting && isHost) || !messageText.trim()}
                         >
-                            <Send size={14} />
+                            <Send size={15} />
                         </button>
                     </form>
                 </div>
