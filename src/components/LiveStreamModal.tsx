@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { X, Video, VideoOff, Mic, MicOff, Send, Users, Radio, Eye, Info } from 'lucide-react';
+import { X, Video, VideoOff, Mic, MicOff, Send, Users, Radio, Eye, Info, Volume2 } from 'lucide-react';
 
 interface LiveStreamModalProps {
     streamId?: string;
@@ -380,55 +380,67 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
     const startViewing = async () => {
         setLoading(true);
         try {
-            const { data: stream, error } = await supabase.from('live_streams')
+            const { data: streamData, error } = await supabase.from('live_streams')
                 .select('*').eq('id', streamId!).single();
 
-            if (error || !stream) { showToast('Could not load stream.', 'error'); onClose(); return; }
-            if (stream.status === 'ended') { showToast('This live stream has already ended.', 'info'); onClose(); return; }
+            if (error || !streamData) { showToast('Could not load stream.', 'error'); onClose(); return; }
+            if (streamData.status === 'ended') { showToast('This live stream has already ended.', 'info'); onClose(); return; }
 
-            // Create peer connection
-            let pc: RTCPeerConnection;
-            try { pc = new RTCPeerConnection(ICE_SERVERS); }
-            catch (pcErr: any) { showToast('WebRTC error: ' + pcErr.message, 'error'); onClose(); return; }
+            // ── Create peer connection ─────────────────────────────────────────
+            const pc = new RTCPeerConnection(ICE_SERVERS);
             singlePeerConnectionRef.current = pc;
 
-            // Tell WebRTC we want to RECEIVE video+audio
-            try {
-                pc.addTransceiver('video', { direction: 'recvonly' });
-                pc.addTransceiver('audio', { direction: 'recvonly' });
-            } catch { /* older browsers — continue */ }
+            // ── Build remote MediaStream BEFORE any tracks arrive ──────────────
+            // Assigning srcObject early means the browser is ready the moment
+            // the first track arrives — no React re-render latency.
+            const remoteMS = new MediaStream();
+            if (remoteVideoRef.current) {
+                remoteVideoRef.current.srcObject = remoteMS;
+            }
 
-            let pendingViewerCandidates: RTCIceCandidateInit[] = [];
-            let remoteSet = false;
+            const playVideo = () => {
+                const vid = remoteVideoRef.current;
+                if (!vid) return;
+                if (vid.srcObject !== remoteMS) vid.srcObject = remoteMS;
+                if (vid.paused) vid.play().catch(() => {});
+            };
 
-            // ontrack: use e.streams[0] directly — it's a live MediaStream that gains
-            // both the video and audio track; assign to the ref immediately so we don't
-            // wait for a React re-render cycle (avoids black-screen on slow renders)
+            // ── ontrack — add e.track directly to remoteMS ────────────────────
+            // Do NOT rely on e.streams[0]: it is undefined in some browsers.
             pc.ontrack = (e) => {
-                const incomingStream = e.streams[0];
-                if (!incomingStream) return;
-                if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== incomingStream) {
-                    remoteVideoRef.current.srcObject = incomingStream;
-                    remoteVideoRef.current.play().catch(() => {});
+                console.log('[KSU-Live] viewer ontrack:', e.track.kind, e.track.readyState);
+                // Add this track (idempotent)
+                if (!remoteMS.getTrackById(e.track.id)) {
+                    remoteMS.addTrack(e.track);
                 }
-                setRemoteStream(incomingStream);
+                // Absorb any additional tracks from e.streams (redundancy)
+                (e.streams || []).forEach(s =>
+                    s.getTracks().forEach(t => {
+                        if (!remoteMS.getTrackById(t.id)) remoteMS.addTrack(t);
+                    })
+                );
+                playVideo();
+                // New MediaStream object → triggers React re-render (shows unmute button)
+                setRemoteStream(new MediaStream(remoteMS.getTracks()));
                 setLoading(false);
             };
 
-            // ICE state tracking + auto-reconnect on disconnect
+            // ── ICE state tracking + auto-reconnect ───────────────────────────
             pc.oniceconnectionstatechange = () => {
-                setIceConnState(pc.iceConnectionState);
-                if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+                const s = pc.iceConnectionState;
+                console.log('[KSU-Live] ICE state:', s);
+                setIceConnState(s);
+                if (s === 'connected' || s === 'completed') {
                     setLoading(false);
                     setViewerStatus('Connected');
+                    playVideo(); // ensure video plays once ICE is up
                 }
-                if (pc.iceConnectionState === 'failed') {
+                if (s === 'failed') {
                     setViewerStatus('Reconnecting...');
                     try { pc.restartIce(); } catch {}
                 }
-                if (pc.iceConnectionState === 'disconnected') {
+                if (s === 'disconnected') {
                     setViewerStatus('Reconnecting...');
-                    // Give it 3 s to recover on its own, then force restart
                     setTimeout(() => {
                         if (singlePeerConnectionRef.current?.iceConnectionState === 'disconnected') {
                             try { singlePeerConnectionRef.current.restartIce(); } catch {}
@@ -437,10 +449,46 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                 }
             };
             pc.onconnectionstatechange = () => {
-                if (pc.connectionState === 'connected') setLoading(false);
+                if (pc.connectionState === 'connected') { setLoading(false); playVideo(); }
             };
 
-            // ─── BROADCAST CHANNEL ─── for chat + ICE candidates + stream_ended (fast path)
+            // ── ICE candidate buffering (before remote description is set) ────
+            let pendingViewerCandidates: RTCIceCandidateInit[] = [];
+            let remoteSet = false;
+            let offerHandled = false; // prevent double-processing
+
+            const processOffer = async (offerPayload: any) => {
+                if (offerHandled) return;
+                offerHandled = true;
+                console.log('[KSU-Live] processing offer');
+                try {
+                    await pc.setRemoteDescription(new RTCSessionDescription(offerPayload));
+                    remoteSet = true;
+
+                    // Flush buffered ICE candidates
+                    for (const c of pendingViewerCandidates) {
+                        try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
+                    }
+                    pendingViewerCandidates = [];
+
+                    const sdpAnswer = await pc.createAnswer();
+                    await pc.setLocalDescription(sdpAnswer);
+
+                    await supabase.from('stream_signals').insert({
+                        stream_id: streamId,
+                        from_user_id: user!.id,
+                        to_user_id: propHostId!,
+                        type: 'answer',
+                        payload: pc.localDescription,
+                    });
+                    console.log('[KSU-Live] answer sent');
+                } catch (err) {
+                    console.error('[KSU-Live] offer processing error:', err);
+                    offerHandled = false; // allow retry
+                }
+            };
+
+            // ── BROADCAST CHANNEL ─────────────────────────────────────────────
             const bcastChan = supabase.channel(`stream_bcast:${streamId}`);
             channelRef.current = bcastChan;
 
@@ -454,15 +502,12 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                     }]);
                     return;
                 }
-
-                // Host ended the stream — close immediately
                 if (event === 'stream_ended') {
                     showToast('The host has ended this live stream.', 'info');
                     onClose();
                     return;
                 }
-
-                // ICE candidates FROM HOST to this viewer
+                // ICE candidates FROM HOST
                 if (event === 'candidate' && targetId === user!.id && candidate) {
                     if (remoteSet) {
                         try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
@@ -472,7 +517,7 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                 }
             });
 
-            // Send viewer ICE candidates to host via Broadcast
+            // Viewer → host ICE candidates
             pc.onicecandidate = (e) => {
                 if (e.candidate && channelRef.current) {
                     channelRef.current.send({
@@ -484,7 +529,7 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
 
             bcastChan.subscribe();
 
-            // ─── DATABASE SIGNALING ─── for offer (guaranteed delivery)
+            // ── DB SIGNALING — postgres_changes for offer ─────────────────────
             const sigSub = supabase
                 .channel(`db_signals_viewer_${user!.id}_${streamId}`)
                 .on('postgres_changes', {
@@ -492,35 +537,12 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                     filter: `to_user_id=eq.${user!.id}`,
                 }, async ({ new: signal }: any) => {
                     if (signal.stream_id !== streamId || signal.type !== 'offer') return;
-
-                    try {
-                        await pc.setRemoteDescription(new RTCSessionDescription(signal.payload));
-                        remoteSet = true;
-
-                        // Flush buffered ICE candidates
-                        for (const c of pendingViewerCandidates) {
-                            try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
-                        }
-                        pendingViewerCandidates = [];
-
-                        const sdpAnswer = await pc.createAnswer();
-                        await pc.setLocalDescription(sdpAnswer);
-
-                        // Store answer in DB for host to pick up
-                        await supabase.from('stream_signals').insert({
-                            stream_id: streamId,
-                            from_user_id: user!.id,
-                            to_user_id: propHostId!,
-                            type: 'answer',
-                            payload: pc.localDescription,
-                        });
-                    } catch (err) {
-                        console.error('Error processing offer:', err);
-                    }
+                    console.log('[KSU-Live] offer received via postgres_changes');
+                    await processOffer(signal.payload);
                 })
                 .subscribe(async (status) => {
                     if (status === 'SUBSCRIBED') {
-                        // Send 'join' to host via DB — guaranteed delivery
+                        console.log('[KSU-Live] viewer DB channel SUBSCRIBED, sending join');
                         await supabase.from('stream_signals').insert({
                             stream_id: streamId,
                             from_user_id: user!.id,
@@ -528,10 +550,33 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                             type: 'join',
                             payload: null,
                         });
+
+                        // ── Polling fallback in case postgres_changes misses the offer ──
+                        // Checks the DB every 1.5 s until offer is received or pc is closed.
+                        const pollOffer = async () => {
+                            if (offerHandled || singlePeerConnectionRef.current !== pc) return;
+                            const { data } = await supabase
+                                .from('stream_signals')
+                                .select('payload')
+                                .eq('to_user_id', user!.id)
+                                .eq('stream_id', streamId!)
+                                .eq('type', 'offer')
+                                .order('created_at', { ascending: false })
+                                .limit(1)
+                                .maybeSingle();
+                            if (data?.payload && !offerHandled) {
+                                console.log('[KSU-Live] offer found via poll');
+                                await processOffer(data.payload);
+                            } else if (!offerHandled) {
+                                setTimeout(pollOffer, 1500);
+                            }
+                        };
+                        // Start polling 2 s after join (give host time to respond)
+                        setTimeout(pollOffer, 2000);
                     }
                 });
 
-            // Watch for stream ending via DB (fallback in case broadcast missed)
+            // ── Watch for stream ending via DB ────────────────────────────────
             const endedChannel = supabase.channel(`stream_ended_${streamId}_${user!.id}`)
                 .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'live_streams', filter: `id=eq.${streamId}` },
                     (payload) => {
@@ -543,12 +588,12 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                 .subscribe();
             streamEndedChannelRef.current = endedChannel;
 
-            // Auto-timeout loading spinner after 20s
-            setTimeout(() => setLoading(false), 20000);
+            // Auto-timeout loading spinner
+            setTimeout(() => setLoading(false), 15000);
 
         } catch (err: any) {
-            console.error('Viewer setup failed:', err);
-            showToast('Failed to set up stream: ' + (err.message || err), 'error');
+            console.error('[KSU-Live] Viewer setup failed:', err);
+            showToast('Failed to connect to stream: ' + (err.message || err), 'error');
             onClose();
         }
     };
@@ -730,6 +775,7 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                     {/* Viewer remote video */}
                     {!isHost && streamId && (
                         <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+                            {/* autoPlay + playsInline + muted=true → guaranteed to autoplay on all browsers */}
                             <video
                                 ref={remoteVideoRef}
                                 autoPlay
@@ -738,33 +784,35 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                                 className="stream-live-video"
                             />
 
-                            {/* Unmute button — always visible until user taps.
-                                Browsers block unmuted autoplay so we start muted;
-                                this button unmutes via a user-gesture (required by browsers). */}
-                            {viewerMuted && remoteStream && (
+                            {/* ── Unmute button ──────────────────────────────────────────
+                                Shown once ICE connects OR once tracks arrive.
+                                Must be a user-gesture to unmute per browser autoplay policy. */}
+                            {viewerMuted && (remoteStream || iceConnState === 'connected' || iceConnState === 'completed') && (
                                 <div
                                     style={{
                                         position: 'absolute', bottom: 76, left: '50%',
                                         transform: 'translateX(-50%)',
-                                        background: 'rgba(0,0,0,0.78)',
-                                        borderRadius: 99, padding: '10px 24px',
-                                        display: 'flex', alignItems: 'center', gap: 9,
+                                        background: 'rgba(0,0,0,0.82)',
+                                        borderRadius: 99, padding: '12px 28px',
+                                        display: 'flex', alignItems: 'center', gap: 10,
                                         cursor: 'pointer', color: 'white',
-                                        fontSize: '0.88rem', fontWeight: 700,
-                                        border: '1px solid rgba(255,255,255,0.22)',
-                                        backdropFilter: 'blur(10px)', zIndex: 10,
-                                        whiteSpace: 'nowrap', boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+                                        fontSize: '0.9rem', fontWeight: 700,
+                                        border: '1px solid rgba(255,255,255,0.25)',
+                                        backdropFilter: 'blur(12px)', zIndex: 10,
+                                        whiteSpace: 'nowrap',
+                                        boxShadow: '0 4px 24px rgba(0,0,0,0.6)',
                                         animation: 'pulse 2s infinite',
                                     }}
                                     onClick={() => {
                                         setViewerMuted(false);
-                                        if (remoteVideoRef.current) {
-                                            remoteVideoRef.current.muted = false;
-                                            remoteVideoRef.current.play().catch(() => {});
+                                        const vid = remoteVideoRef.current;
+                                        if (vid) {
+                                            vid.muted = false;
+                                            vid.play().catch(() => {});
                                         }
                                     }}
                                 >
-                                    <span style={{ fontSize: '1.25rem' }}>🔇</span>
+                                    <Volume2 size={18} />
                                     Tap to enable audio
                                 </div>
                             )}
