@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { Edit2, MapPin, Link, Lock, Unlock, Camera, Grid, Image, Heart, X, Check, BadgeCheck } from 'lucide-react';
+import { Edit2, MapPin, Link, Lock, Unlock, Camera, Grid, Image, Heart, X, Check, BadgeCheck, Bookmark } from 'lucide-react';
 import PostCard from './PostCard';
 
 interface Profile {
@@ -19,7 +19,8 @@ interface Post {
   profiles: { username: string; full_name: string | null; avatar_url: string | null; is_verified: boolean; };
 }
 
-const TABS = ['Posts', 'Media', 'Liked'];
+const ALL_TABS = ['Posts', 'Media', 'Liked', 'Saved'];
+const PUBLIC_TABS = ['Posts', 'Media', 'Liked'];
 
 export default function ProfilePage({ userId, setActivePage }: { userId?: string; setActivePage: (p: string) => void }) {
   const { user, profile: myProfile, refreshProfile } = useAuth();
@@ -30,6 +31,7 @@ export default function ProfilePage({ userId, setActivePage }: { userId?: string
   const [profile, setProfile] = useState<Profile | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
   const [likedPosts, setLikedPosts] = useState<Post[]>([]);
+  const [savedPosts, setSavedPosts] = useState<Post[]>([]);
   const [tab, setTab] = useState('Posts');
   const [loading, setLoading] = useState(true);
   const [isFollowing, setIsFollowing] = useState(false);
@@ -87,9 +89,23 @@ export default function ProfilePage({ userId, setActivePage }: { userId?: string
     if (data) setLikedPosts(data as any);
   };
 
+  const fetchSaved = async () => {
+    if (!user || !isOwn) return;
+    const { data: saved } = await supabase
+      .from('saved_posts')
+      .select('post_id, posts(*,profiles(username,full_name,avatar_url,is_verified))')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false });
+    if (saved) {
+      const posts = saved.map((s: any) => s.posts).filter(Boolean);
+      setSavedPosts(posts as any);
+    }
+  };
+
   const handleTabChange = (t: string) => {
     setTab(t);
     if (t === 'Liked' && likedPosts.length === 0) fetchLiked();
+    if (t === 'Saved' && savedPosts.length === 0) fetchSaved();
   };
 
   const handleFollow = async () => {
@@ -171,8 +187,12 @@ export default function ProfilePage({ userId, setActivePage }: { userId?: string
   const initials = profile.full_name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
     || profile.username[0].toUpperCase();
 
-  const currentPosts = tab === 'Liked' ? likedPosts : tab === 'Media'
-    ? posts.filter(p => p.media_urls?.length > 0) : posts;
+  const TABS = isOwn ? ALL_TABS : PUBLIC_TABS;
+
+  const currentPosts = tab === 'Liked' ? likedPosts
+    : tab === 'Saved' ? savedPosts
+    : tab === 'Media' ? posts.filter(p => p.media_urls?.length > 0)
+    : posts;
 
   return (
     <div>
@@ -265,6 +285,7 @@ export default function ProfilePage({ userId, setActivePage }: { userId?: string
               {t === 'Posts' && <Grid size={14} />}
               {t === 'Media' && <Image size={14} />}
               {t === 'Liked' && <Heart size={14} />}
+              {t === 'Saved' && <Bookmark size={14} />}
               {t}
             </button>
           ))}
