@@ -11,11 +11,18 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { X, Video, VideoOff, Mic, MicOff, Send, Users, Radio, Eye, Info, Volume2 } from 'lucide-react';
 
-// ─── Your Agora App ID ────────────────────────────────────────────────────────
-const AGORA_APP_ID = '24fe140693de45edbe771b4ffd7b6854';
+// ─── Agora credentials ───────────────────────────────────────────────────────
+// App ID for "KSU Connect Live" project (no certificate required in client code)
+const AGORA_APP_ID = 'c63f70ea4bbe48a3821166f59aa2d8d1';
 
-// Suppress Agora's verbose console logs in production
-AgoraRTC.setLogLevel(3); // 3 = ERROR only
+// Fetch a short-lived token from the Vercel serverless function
+async function fetchAgoraToken(channel: string, uid: number, role: 'publisher' | 'subscriber'): Promise<string> {
+    const res = await fetch(`/api/agora-token?channel=${encodeURIComponent(channel)}&uid=${uid}&role=${role}`);
+    if (!res.ok) throw new Error('Token server error: ' + res.status);
+    const data = await res.json();
+    if (!data.token) throw new Error('No token returned from server');
+    return data.token;
+}
 
 interface LiveStreamModalProps {
     streamId?: string;
@@ -160,8 +167,12 @@ export default function LiveStreamModal({
             clientRef.current = client;
             await client.setClientRole('host');
 
-            // 3. Join channel (channel name = stream UUID)
-            await client.join(AGORA_APP_ID, sid, null, user!.id.slice(0, 8));
+            // 3. Fetch a publisher token from our Vercel token server
+            const uid = Math.floor(Math.random() * 999999);
+            const token = await fetchAgoraToken(sid, uid, 'publisher');
+
+            // 4. Join channel with token
+            await client.join(AGORA_APP_ID, sid, token, uid);
 
             // 4. Re-use preview camera track if available, otherwise create fresh
             let videoTrack: ICameraVideoTrack;
@@ -258,9 +269,12 @@ export default function LiveStreamModal({
             clientRef.current = client;
             await client.setClientRole('audience', { level: 1 }); // 1 = low latency
 
-            // Join channel
+            // Fetch a subscriber token
             const uid = Math.floor(Math.random() * 999999);
-            await client.join(AGORA_APP_ID, streamId!, null, uid);
+            const token = await fetchAgoraToken(streamId!, uid, 'subscriber');
+
+            // Join channel
+            await client.join(AGORA_APP_ID, streamId!, token, uid);
 
             // ── When host publishes video / audio ─────────────────────────
             client.on('user-published', async (remoteUser: IAgoraRTCRemoteUser, mediaType: 'video' | 'audio') => {

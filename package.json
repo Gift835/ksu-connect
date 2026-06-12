@@ -11,7 +11,9 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.0",
+    "agora-access-token": "^2.0.4",
     "agora-rtc-sdk-ng": "^4.24.4",
+    "agora-token": "^2.0.5",
     "framer-motion": "^12.40.0",
     "lucide-react": "^1.17.0",
     "react": "^19.2.6",
