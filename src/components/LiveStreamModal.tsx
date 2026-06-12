@@ -20,22 +20,39 @@ interface ChatMessage {
     timestamp: number;
 }
 
-// STUN + TURN servers — using valid URL formats (no query-string in turn: URI)
+// ICE config — multiple STUN + TURN with TCP transport for strict NAT/firewalls
 const ICE_SERVERS: RTCConfiguration = {
     iceServers: [
-        { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-        // TCP TURN relay — works behind strict mobile NAT
+        {
+            urls: [
+                'stun:stun.l.google.com:19302',
+                'stun:stun1.l.google.com:19302',
+                'stun:stun2.l.google.com:19302',
+                'stun:stun3.l.google.com:19302',
+                'stun:stun4.l.google.com:19302',
+            ],
+        },
+        // TURN relay — TCP variants bypass strict firewalls & mobile NAT
         {
             urls: [
                 'turn:openrelay.metered.ca:80',
-                'turn:openrelay.metered.ca:443',
+                'turn:openrelay.metered.ca:80?transport=tcp',
+                'turn:openrelay.metered.ca:443?transport=tcp',
                 'turns:openrelay.metered.ca:443',
             ],
             username: 'openrelayproject',
             credential: 'openrelayproject',
         },
+        // Backup public TURN
+        {
+            urls: 'turn:numb.viagenie.ca',
+            credential: 'muazkh',
+            username: 'webrtc@live.com',
+        },
     ],
     iceCandidatePoolSize: 10,
+    bundlePolicy: 'max-bundle',
+    rtcpMuxPolicy: 'require',
 };
 
 export default function LiveStreamModal({ streamId: propStreamId, streamTitle: propStreamTitle, hostId: propHostId, isHost, onClose }: LiveStreamModalProps) {
@@ -64,7 +81,9 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
     const [messageText, setMessageText] = useState('');
     const [chatOpen, setChatOpen] = useState(false);
-    const [autoPlayBlocked, setAutoPlayBlocked] = useState(false);
+    // Viewer video starts muted — browsers block unmuted autoplay; user taps to enable audio
+    const [viewerMuted, setViewerMuted] = useState(true);
+    const [iceConnState, setIceConnState] = useState('');
     const [viewerStatus, setViewerStatus] = useState('Connecting...');
 
     // Refs for video components
@@ -112,15 +131,13 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
         }
     }, [previewStream]);
 
-    // KEY FIX: Reliably attach remote stream to video element when it arrives
+    // Attach remote stream to video element; muted videos always autoplay
     useEffect(() => {
         if (!remoteStream || !remoteVideoRef.current) return;
         const video = remoteVideoRef.current;
+        if (video.srcObject === remoteStream) return; // already attached
         video.srcObject = remoteStream;
-        video.play().catch(() => {
-            // Browser blocked autoplay — show tap-to-play button
-            setAutoPlayBlocked(true);
-        });
+        video.play().catch(() => {});
     }, [remoteStream]);
 
     const startCameraPreview = async () => {
@@ -383,19 +400,41 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
 
             let pendingViewerCandidates: RTCIceCandidateInit[] = [];
             let remoteSet = false;
-            const rStream = new MediaStream();
 
-            // ontrack: fires when host's video/audio arrives
+            // ontrack: use e.streams[0] directly — it's a live MediaStream that gains
+            // both the video and audio track; assign to the ref immediately so we don't
+            // wait for a React re-render cycle (avoids black-screen on slow renders)
             pc.ontrack = (e) => {
-                if (!rStream.getTrackById(e.track.id)) rStream.addTrack(e.track);
-                setRemoteStream(new MediaStream(rStream.getTracks()));
+                const incomingStream = e.streams[0];
+                if (!incomingStream) return;
+                if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== incomingStream) {
+                    remoteVideoRef.current.srcObject = incomingStream;
+                    remoteVideoRef.current.play().catch(() => {});
+                }
+                setRemoteStream(incomingStream);
                 setLoading(false);
             };
 
-            // ICE state tracking
+            // ICE state tracking + auto-reconnect on disconnect
             pc.oniceconnectionstatechange = () => {
-                if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') setLoading(false);
-                if (pc.iceConnectionState === 'failed') { try { pc.restartIce(); } catch {} }
+                setIceConnState(pc.iceConnectionState);
+                if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+                    setLoading(false);
+                    setViewerStatus('Connected');
+                }
+                if (pc.iceConnectionState === 'failed') {
+                    setViewerStatus('Reconnecting...');
+                    try { pc.restartIce(); } catch {}
+                }
+                if (pc.iceConnectionState === 'disconnected') {
+                    setViewerStatus('Reconnecting...');
+                    // Give it 3 s to recover on its own, then force restart
+                    setTimeout(() => {
+                        if (singlePeerConnectionRef.current?.iceConnectionState === 'disconnected') {
+                            try { singlePeerConnectionRef.current.restartIce(); } catch {}
+                        }
+                    }, 3000);
+                }
             };
             pc.onconnectionstatechange = () => {
                 if (pc.connectionState === 'connected') setLoading(false);
@@ -695,39 +734,55 @@ export default function LiveStreamModal({ streamId: propStreamId, streamTitle: p
                                 ref={remoteVideoRef}
                                 autoPlay
                                 playsInline
-                                muted={false}
-                                onCanPlay={(e) => {
-                                    // Force play when media is ready — handles browsers that ignore autoPlay
-                                    const v = e.currentTarget;
-                                    if (v.paused) v.play().catch(() => setAutoPlayBlocked(true));
-                                }}
+                                muted={viewerMuted}
                                 className="stream-live-video"
                             />
-                            {/* Tap-to-play overlay (iOS/some Android block autoplay) */}
-                            {autoPlayBlocked && (
+
+                            {/* Unmute button — always visible until user taps.
+                                Browsers block unmuted autoplay so we start muted;
+                                this button unmutes via a user-gesture (required by browsers). */}
+                            {viewerMuted && remoteStream && (
                                 <div
-                                    className="stream-loading"
-                                    style={{ background: 'rgba(0,0,0,0.7)', cursor: 'pointer' }}
+                                    style={{
+                                        position: 'absolute', bottom: 76, left: '50%',
+                                        transform: 'translateX(-50%)',
+                                        background: 'rgba(0,0,0,0.78)',
+                                        borderRadius: 99, padding: '10px 24px',
+                                        display: 'flex', alignItems: 'center', gap: 9,
+                                        cursor: 'pointer', color: 'white',
+                                        fontSize: '0.88rem', fontWeight: 700,
+                                        border: '1px solid rgba(255,255,255,0.22)',
+                                        backdropFilter: 'blur(10px)', zIndex: 10,
+                                        whiteSpace: 'nowrap', boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+                                        animation: 'pulse 2s infinite',
+                                    }}
                                     onClick={() => {
-                                        remoteVideoRef.current?.play();
-                                        setAutoPlayBlocked(false);
+                                        setViewerMuted(false);
+                                        if (remoteVideoRef.current) {
+                                            remoteVideoRef.current.muted = false;
+                                            remoteVideoRef.current.play().catch(() => {});
+                                        }
                                     }}
                                 >
-                                    <div style={{
-                                        width: 64, height: 64, borderRadius: '50%',
-                                        background: 'rgba(255,255,255,0.15)',
-                                        border: '2px solid rgba(255,255,255,0.4)',
-                                        display: 'flex', alignItems: 'center', justifyContent: 'center'
-                                    }}>
-                                        <span style={{ fontSize: '1.8rem' }}>▶️</span>
-                                    </div>
-                                    <p style={{ marginTop: 10 }}>Tap to play stream</p>
+                                    <span style={{ fontSize: '1.25rem' }}>🔇</span>
+                                    Tap to enable audio
                                 </div>
                             )}
+
+                            {/* Waiting / connection-failed state */}
                             {!remoteStream && !loading && (
                                 <div className="stream-loading" style={{ background: 'transparent' }}>
-                                    <Eye size={28} style={{ opacity: 0.3 }} />
-                                    <p>Waiting for host video...</p>
+                                    {iceConnState === 'failed' ? (
+                                        <>
+                                            <span style={{ fontSize: '2.2rem' }}>⚠️</span>
+                                            <p style={{ marginTop: 10 }}>Connection failed — retrying…</p>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <div className="spinner" style={{ width: 36, height: 36, borderWidth: 2.5 }} />
+                                            <p style={{ marginTop: 12 }}>Connecting to stream…</p>
+                                        </>
+                                    )}
                                 </div>
                             )}
                         </div>
