@@ -227,21 +227,39 @@ export default function LiveStreamModal({
                 if (localDivRef.current) videoTrack.play(localDivRef.current);
             });
 
-            // 8. Viewer count listeners
-            client.on('user-joined', () => setViewerCount(c => c + 1));
-            client.on('user-left',   () => setViewerCount(c => Math.max(0, c - 1)));
+            // 8. Accurate viewer count — use Agora's own remoteUsers list
+            //    (manual ±1 can drift; remoteUsers.length is always exact)
+            const syncViewerCount = () => {
+                const count = client.remoteUsers.length;
+                setViewerCount(count);
+                // Persist to DB so the feed thumbnail reflects real viewer count
+                supabase.from('live_streams')
+                    .update({ viewer_count: count })
+                    .eq('id', sid)
+                    .eq('status', 'live')
+                    .then(() => {});
+            };
+            client.on('user-joined',  syncViewerCount);
+            client.on('user-left',    syncViewerCount);
+            // Set initial count immediately (edge case: viewers already in channel)
+            syncViewerCount();
 
             // 9. Chat
             setupChat(sid);
 
-            // 10. Heartbeat — touch updated_at every 30s so ghost-cleanup knows this
-            //     stream is still truly live (Feed.tsx uses updated_at to detect zombies)
+            // 10. Heartbeat — touch updated_at every 30s + sync viewer count
             heartbeatRef.current = setInterval(async () => {
+                const count = client.remoteUsers.length;
+                setViewerCount(count);
                 await supabase.from('live_streams')
-                    .update({ updated_at: new Date().toISOString() })
+                    .update({
+                        updated_at:   new Date().toISOString(),
+                        viewer_count: count,
+                    })
                     .eq('id', sid)
                     .eq('status', 'live');
             }, 30_000);
+
 
             setIsBroadcasting(true);
             setPhase('live');

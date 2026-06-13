@@ -73,28 +73,40 @@ export default function Feed({ setActivePage, onStartLive, onWatchLive }: {
   }, [user]);
 
   const fetchLiveStreams = async () => {
-    // 1. Auto-end ANY stream marked 'live' after 5 minutes of inactivity
-    //    (handles crashes, closed tabs, network drops)
+    const now = new Date().toISOString();
+
+    // 1. Safety net: end streams > 30 min old with no heartbeat
+    //    Uses created_at (always exists). Once the migration SQL is run,
+    //    the heartbeat keeps updated_at fresh so real streams survive.
+    const thirtyMinsAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    await supabase
+      .from('live_streams')
+      .update({ status: 'ended', ended_at: now })
+      .eq('status', 'live')
+      .lt('created_at', thirtyMinsAgo);
+
+    // 2. After migration: also end streams whose heartbeat (updated_at) is stale > 5 min
+    //    Silently ignored if updated_at column doesn't exist yet.
     const fiveMinsAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     await supabase
       .from('live_streams')
-      .update({ status: 'ended', ended_at: new Date().toISOString() })
+      .update({ status: 'ended', ended_at: now })
       .eq('status', 'live')
-      .lt('updated_at', fiveMinsAgo);
+      .lt('updated_at' as any, fiveMinsAgo)
+      .catch(() => {}); // safe no-op if column doesn't exist
 
-    // 2. Also nuke the current user's own stuck streams immediately
-    //    (a real broadcaster updates the DB; ghost records don't)
+    // 3. Kill current user's own zombie streams (created > 2 min ago, no heartbeat)
     if (user) {
       const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
       await supabase
         .from('live_streams')
-        .update({ status: 'ended', ended_at: new Date().toISOString() })
+        .update({ status: 'ended', ended_at: now })
         .eq('status', 'live')
         .eq('host_id', user.id)
-        .lt('updated_at', twoMinsAgo);
+        .lt('created_at', twoMinsAgo);
     }
 
-    // 3. Fetch truly live streams (started within the last 1 hour)
+    // 4. Fetch genuinely live streams from the last hour
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     const { data } = await supabase.from('live_streams')
       .select('*, profiles:host_id(username, full_name, avatar_url, is_verified)')
@@ -269,6 +281,7 @@ export default function Feed({ setActivePage, onStartLive, onWatchLive }: {
               <div
                 key={stream.id}
                 onClick={() => onWatchLive(stream.id, stream.title, stream.host_id)}
+                title={stream.title}
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
@@ -307,6 +320,23 @@ export default function Feed({ setActivePage, onStartLive, onWatchLive }: {
                     fontSize: '0.55rem', fontWeight: 900, padding: '1px 4px',
                     borderRadius: 4, border: '1px solid var(--bg-primary)',
                   }}>LIVE</span>
+                  {/* Viewer count badge */}
+                  {stream.viewer_count > 0 && (
+                    <span style={{
+                      position: 'absolute', top: -4, left: -4,
+                      background: 'rgba(0,0,0,0.75)',
+                      backdropFilter: 'blur(4px)',
+                      color: 'white',
+                      fontSize: '0.5rem', fontWeight: 800,
+                      padding: '2px 5px',
+                      borderRadius: 99,
+                      border: '1px solid rgba(255,255,255,0.2)',
+                      display: 'flex', alignItems: 'center', gap: 2,
+                      whiteSpace: 'nowrap',
+                    }}>
+                      <Users size={7} /> {stream.viewer_count}
+                    </span>
+                  )}
                 </div>
                 <span className="truncate" style={{ fontSize: '0.72rem', maxWidth: 64, textAlign: 'center', fontWeight: 600 }}>
                   {sp?.username}
