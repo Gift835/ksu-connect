@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+import { nodePolyfills } from 'vite-plugin-node-polyfills'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -8,18 +9,24 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [
+      // Polyfill Node.js built-ins (crypto, buffer, etc.) for the browser bundle.
+      // This is required so agora-access-token can generate tokens client-side
+      // without a token server in both dev and production.
+      nodePolyfills({
+        include: ['crypto', 'buffer', 'stream', 'util', 'events'],
+        globals: { Buffer: true, global: true, process: true },
+      }),
+
       react(),
 
-      // ── Dev-only: serve /api/agora-token so local `npm run dev` works
-      //    without needing `vercel dev`.  On production the real Vercel
-      //    serverless function in api/agora-token.ts handles the route.
+      // ── Dev-only fallback: serve /api/agora-token in case the polyfill
+      //    path ever has issues. On Vercel the real serverless function handles it.
       {
         name: 'agora-token-dev',
         apply: 'serve',
         configureServer(server) {
           server.middlewares.use('/api/agora-token', async (req, res) => {
             try {
-              // Dynamic import handles CJS/ESM interop
               const mod = await import('agora-token') as any
               const RtcTokenBuilder = mod.RtcTokenBuilder ?? mod.default?.RtcTokenBuilder
               const RtcRole         = mod.RtcRole         ?? mod.default?.RtcRole
@@ -34,7 +41,6 @@ export default defineConfig(({ mode }) => {
                 return
               }
 
-              // Parse query params from the URL
               const rawUrl = req.url ?? ''
               const qs = rawUrl.includes('?') ? rawUrl.slice(rawUrl.indexOf('?')) : ''
               const params = new URLSearchParams(qs)

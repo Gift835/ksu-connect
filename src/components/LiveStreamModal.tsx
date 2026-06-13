@@ -104,6 +104,7 @@ export default function LiveStreamModal({
     const chatChanRef    = useRef<any>(null);
     const endedChanRef   = useRef<any>(null);
     const chatEndRef     = useRef<HTMLDivElement>(null);
+    const heartbeatRef   = useRef<ReturnType<typeof setInterval> | null>(null);
 
     // ── Auto-scroll chat ───────────────────────────────────────────────────
     useEffect(() => {
@@ -113,6 +114,14 @@ export default function LiveStreamModal({
     // ── On mount: start preview (host) or join stream (viewer) ────────────
     useEffect(() => {
         if (isHost) {
+            // Nuke any existing zombie streams owned by this user before going live
+            if (user) {
+                supabase.from('live_streams')
+                    .update({ status: 'ended', ended_at: new Date().toISOString() })
+                    .eq('host_id', user.id)
+                    .eq('status', 'live')
+                    .then(() => {});
+            }
             startPreview();
         } else if (propStreamId) {
             setPhase('viewer');
@@ -120,6 +129,7 @@ export default function LiveStreamModal({
         }
 
         return () => {
+            if (heartbeatRef.current) clearInterval(heartbeatRef.current);
             doCleanup();
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -224,6 +234,15 @@ export default function LiveStreamModal({
             // 9. Chat
             setupChat(sid);
 
+            // 10. Heartbeat — touch updated_at every 30s so ghost-cleanup knows this
+            //     stream is still truly live (Feed.tsx uses updated_at to detect zombies)
+            heartbeatRef.current = setInterval(async () => {
+                await supabase.from('live_streams')
+                    .update({ updated_at: new Date().toISOString() })
+                    .eq('id', sid)
+                    .eq('status', 'live');
+            }, 30_000);
+
             setIsBroadcasting(true);
             setPhase('live');
             setLoading(false);
@@ -231,11 +250,17 @@ export default function LiveStreamModal({
 
         } catch (err: any) {
             console.error('[KSU-Live] Go-live failed:', err);
+            // Always clean up the DB record — retry 3 times to be sure
             if (insertedId) {
-                await supabase.from('live_streams')
-                    .update({ status: 'ended', ended_at: new Date().toISOString() })
-                    .eq('id', insertedId);
+                for (let attempt = 0; attempt < 3; attempt++) {
+                    const { error: cleanupErr } = await supabase.from('live_streams')
+                        .update({ status: 'ended', ended_at: new Date().toISOString() })
+                        .eq('id', insertedId);
+                    if (!cleanupErr) break;
+                    await new Promise(r => setTimeout(r, 500));
+                }
             }
+            if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
             await doCleanup();
             const msg = err?.message ?? String(err);
             showToast('Could not start stream: ' + msg, 'error');
@@ -280,11 +305,14 @@ export default function LiveStreamModal({
             clientRef.current = client;
             await client.setClientRole('audience', { level: 1 });
 
-            // Generate token
+            // Generate token (client-side via agora-access-token + Node.js polyfills)
             const uid   = Math.floor(Math.random() * 999_999) + 1;
             const token = buildAgoraToken(sid, uid, 'subscriber');
 
-            // Join
+            // Log token status for debugging
+            console.info('[KSU-Live] Viewer token:', token ? 'generated ✓' : 'null (will fail if cert required)');
+
+            // Join — if this throws, the stream is dead; mark it ended in DB
             await client.join(AGORA_APP_ID, sid, token, uid);
 
             // Handle incoming tracks
@@ -335,10 +363,27 @@ export default function LiveStreamModal({
 
         } catch (err: any) {
             console.error('[KSU-Live] Viewer join failed:', err);
-            showToast('Failed to join stream: ' + (err.message ?? err), 'error');
+            // If Agora rejected the join, this stream is a ghost — kill it in the DB
+            // so it stops appearing in everyone's feed
+            const msg = err?.message ?? String(err);
+            const isAgoraError = msg.includes('CAN_NOT_GET_GATEWAY_SERVER') ||
+                                 msg.includes('INVALID_VENDOR_KEY') ||
+                                 msg.includes('TOKEN_EXPIRED') ||
+                                 msg.includes('dynamic use static key') ||
+                                 err?.code === 'CAN_NOT_GET_GATEWAY_SERVER';
+            if (isAgoraError && sid) {
+                await supabase.from('live_streams')
+                    .update({ status: 'ended', ended_at: new Date().toISOString() })
+                    .eq('id', sid)
+                    .eq('status', 'live');
+                showToast('This stream appears to have ended — removing it from the feed.', 'info');
+            } else {
+                showToast('Failed to join stream: ' + msg, 'error');
+            }
             onClose();
         }
     };
+
 
     // ─────────────────────────────────────────────────────────────────────────
     //  CHAT

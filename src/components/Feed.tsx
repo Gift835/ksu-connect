@@ -73,15 +73,28 @@ export default function Feed({ setActivePage, onStartLive, onWatchLive }: {
   }, [user]);
 
   const fetchLiveStreams = async () => {
-    // Auto-end any stream still marked 'live' after 30 minutes (handles crashes/network drops)
-    const thirtyMinsAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    // 1. Auto-end ANY stream marked 'live' after 5 minutes of inactivity
+    //    (handles crashes, closed tabs, network drops)
+    const fiveMinsAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     await supabase
       .from('live_streams')
       .update({ status: 'ended', ended_at: new Date().toISOString() })
       .eq('status', 'live')
-      .lt('created_at', thirtyMinsAgo);
+      .lt('updated_at', fiveMinsAgo);
 
-    // Only show streams started in the last 1 hour that are truly live
+    // 2. Also nuke the current user's own stuck streams immediately
+    //    (a real broadcaster updates the DB; ghost records don't)
+    if (user) {
+      const twoMinsAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+      await supabase
+        .from('live_streams')
+        .update({ status: 'ended', ended_at: new Date().toISOString() })
+        .eq('status', 'live')
+        .eq('host_id', user.id)
+        .lt('updated_at', twoMinsAgo);
+    }
+
+    // 3. Fetch truly live streams (started within the last 1 hour)
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     const { data } = await supabase.from('live_streams')
       .select('*, profiles:host_id(username, full_name, avatar_url, is_verified)')
