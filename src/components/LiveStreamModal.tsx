@@ -1,37 +1,49 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AgoraRTC from 'agora-rtc-sdk-ng';
 import type {
     IAgoraRTCClient,
     ICameraVideoTrack,
     IMicrophoneAudioTrack,
     IAgoraRTCRemoteUser,
+    IRemoteAudioTrack,
 } from 'agora-rtc-sdk-ng';
+// Vite handles CJS→ESM interop for agora-access-token automatically
+import { RtcTokenBuilder, RtcRole } from 'agora-access-token';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { X, Video, VideoOff, Mic, MicOff, Send, Users, Radio, Eye, Info, Volume2 } from 'lucide-react';
+import { X, Video, VideoOff, Mic, MicOff, Send, Users, Radio, Eye, Volume2, VolumeX } from 'lucide-react';
 
-// ─── Agora credentials ───────────────────────────────────────────────────────
-// App ID for "KSU Connect Live" project (no certificate required in client code)
-const AGORA_APP_ID = 'c63f70ea4bbe48a3821166f59aa2d8d1';
+// ─── Agora App credentials ────────────────────────────────────────────────────
+// App ID is public. App Certificate is used client-side to sign tokens — this
+// avoids needing a separate token server during development.
+const AGORA_APP_ID   = 'c63f70ea4bbe48a3821166f59aa2d8d1';
+const AGORA_APP_CERT = '9f2c6f468574470eb86461754472ee8c';
 
-// Fetch a short-lived token from the Vercel serverless function
-async function fetchAgoraToken(channel: string, uid: number, role: 'publisher' | 'subscriber'): Promise<string> {
-    const res = await fetch(`/api/agora-token?channel=${encodeURIComponent(channel)}&uid=${uid}&role=${role}`);
-    if (!res.ok) {
-        let detail = '';
-        try { detail = (await res.json()).error ?? ''; } catch (_) {}
-        const hint = res.status === 404
-            ? ' (run `vercel dev` locally or deploy to Vercel)'
-            : detail ? ` — ${detail}` : '';
-        throw new Error(`Token server ${res.status}${hint}`);
+// Suppress Agora SDK console noise in non-error cases
+AgoraRTC.setLogLevel(3); // 3 = warn+error only
+
+// ─── Token generation (client-side, no server required) ─────────────────────
+function buildAgoraToken(channel: string, uid: number, role: 'publisher' | 'subscriber'): string | null {
+    try {
+        if (!AGORA_APP_CERT) return null;
+        const expireTime = Math.floor(Date.now() / 1000) + 3600;
+        const rtcRole    = role === 'publisher' ? RtcRole.PUBLISHER : RtcRole.SUBSCRIBER;
+        return RtcTokenBuilder.buildTokenWithUid(
+            AGORA_APP_ID,
+            AGORA_APP_CERT,
+            channel,
+            uid,
+            rtcRole,
+            expireTime,
+        );
+    } catch (err) {
+        console.error('[KSU-Live] Token build failed:', err);
+        return null;
     }
-    const data = await res.json();
-    if (!data.token) throw new Error('No token returned from server');
-    return data.token;
 }
 
-
+// ─── Types ───────────────────────────────────────────────────────────────────
 interface LiveStreamModalProps {
     streamId?: string;
     streamTitle?: string;
@@ -48,6 +60,7 @@ interface ChatMessage {
     timestamp: number;
 }
 
+// ─── Component ────────────────────────────────────────────────────────────────
 export default function LiveStreamModal({
     streamId: propStreamId,
     streamTitle: propStreamTitle,
@@ -57,188 +70,181 @@ export default function LiveStreamModal({
     const { user, profile } = useAuth();
     const { showToast } = useToast();
 
-    // ── Stream metadata ────────────────────────────────────────────────────
-    const [streamId,       setStreamId]       = useState<string | null>(propStreamId || null);
-    const [title,          setTitle]          = useState(propStreamTitle || '');
+    // ── Stream state ───────────────────────────────────────────────────────
+    const [streamId,       setStreamId]       = useState<string | null>(propStreamId ?? null);
+    const [title,          setTitle]          = useState(propStreamTitle ?? '');
     const [isBroadcasting, setIsBroadcasting] = useState(false);
     const [viewerCount,    setViewerCount]    = useState(0);
+    const [phase, setPhase]                   = useState<'setup' | 'live' | 'viewer'>('setup');
 
-    // ── UI states ──────────────────────────────────────────────────────────
-    const [loading,       setLoading]       = useState(!isHost);
-    const [connected,     setConnected]     = useState(false); // viewer: host track arrived
-    const [cameraReady,   setCameraReady]   = useState(false);
-    const [videoEnabled,  setVideoEnabled]  = useState(true);
-    const [audioEnabled,  setAudioEnabled]  = useState(true);
-    const [viewerMuted,   setViewerMuted]   = useState(true);
-    const [chatOpen,      setChatOpen]      = useState(false);
-    const [chatMessages,  setChatMessages]  = useState<ChatMessage[]>([]);
-    const [messageText,   setMessageText]   = useState('');
-    const [previewReady,  setPreviewReady]  = useState(false); // host camera preview
+    // ── UI flags ───────────────────────────────────────────────────────────
+    const [loading,      setLoading]      = useState(false);
+    const [cameraOk,     setCameraOk]     = useState(false);
+    const [videoOn,      setVideoOn]      = useState(true);
+    const [audioOn,      setAudioOn]      = useState(true);
+    const [viewerMuted,  setViewerMuted]  = useState(true);
+    const [chatOpen,     setChatOpen]     = useState(false);
+    const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+    const [messageText,  setMessageText]  = useState('');
+    const [remoteVideoReady, setRemoteVideoReady] = useState(false);
 
-    // ── Refs ───────────────────────────────────────────────────────────────
-    const clientRef          = useRef<IAgoraRTCClient | null>(null);
-    const localVideoTrackRef = useRef<ICameraVideoTrack | null>(null);
-    const localAudioTrackRef = useRef<IMicrophoneAudioTrack | null>(null);
-    const remoteAudioTrackRef= useRef<any>(null);    // viewer: host audio track
-    const previewTrackRef    = useRef<ICameraVideoTrack | null>(null); // host setup preview
+    // ── Agora refs ─────────────────────────────────────────────────────────
+    const clientRef       = useRef<IAgoraRTCClient | null>(null);
+    const localVidRef     = useRef<ICameraVideoTrack | null>(null);
+    const localAudRef     = useRef<IMicrophoneAudioTrack | null>(null);
+    const previewTrackRef = useRef<ICameraVideoTrack | null>(null);
+    const remoteAudRef    = useRef<IRemoteAudioTrack | null>(null);
 
-    // DOM containers that Agora renders video INTO
-    const localVideoElRef    = useRef<HTMLDivElement>(null);
-    const remoteVideoElRef   = useRef<HTMLDivElement>(null);
-    const previewVideoElRef  = useRef<HTMLDivElement>(null);
+    // ── DOM containers for Agora video ─────────────────────────────────────
+    const previewDivRef  = useRef<HTMLDivElement>(null);
+    const localDivRef    = useRef<HTMLDivElement>(null);
+    const remoteDivRef   = useRef<HTMLDivElement>(null);
 
-    // Supabase chat channel
-    const chatChannelRef     = useRef<any>(null);
-    const endedChannelRef    = useRef<any>(null);
-    const chatEndRef         = useRef<HTMLDivElement>(null);
+    // ── Supabase channels ──────────────────────────────────────────────────
+    const chatChanRef    = useRef<any>(null);
+    const endedChanRef   = useRef<any>(null);
+    const chatEndRef     = useRef<HTMLDivElement>(null);
 
     // ── Auto-scroll chat ───────────────────────────────────────────────────
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [chatMessages]);
 
-    // ── Host: start camera preview immediately ─────────────────────────────
+    // ── On mount: start preview (host) or join stream (viewer) ────────────
     useEffect(() => {
-        if (isHost && !isBroadcasting) startCameraPreview();
-        return () => {
-            if (isHost && streamId) {
-                supabase.from('live_streams')
-                    .update({ status: 'ended', ended_at: new Date().toISOString() })
-                    .eq('id', streamId).eq('status', 'live').then(() => {});
-            }
-            cleanup();
-        };
-    }, []);
-
-    // ── Viewer: join as soon as the modal opens ────────────────────────────
-    useEffect(() => {
-        if (!isHost && streamId) startViewing();
-    }, []);
-
-    // ── Play preview track into div once div is ready ─────────────────────
-    useEffect(() => {
-        if (previewTrackRef.current && previewVideoElRef.current && previewReady) {
-            previewTrackRef.current.play(previewVideoElRef.current);
+        if (isHost) {
+            startPreview();
+        } else if (propStreamId) {
+            setPhase('viewer');
+            joinStream(propStreamId);
         }
-    }, [previewReady]);
+
+        return () => {
+            doCleanup();
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // ─────────────────────────────────────────────────────────────────────────
     //  CLEANUP
     // ─────────────────────────────────────────────────────────────────────────
-    const cleanup = async () => {
-        try {
-            previewTrackRef.current?.stop();
-            previewTrackRef.current?.close();
-            localVideoTrackRef.current?.stop();
-            localVideoTrackRef.current?.close();
-            localAudioTrackRef.current?.stop();
-            localAudioTrackRef.current?.close();
-            if (clientRef.current) await clientRef.current.leave();
-        } catch (_) {}
-        if (chatChannelRef.current)  supabase.removeChannel(chatChannelRef.current);
-        if (endedChannelRef.current) supabase.removeChannel(endedChannelRef.current);
-    };
+    const doCleanup = useCallback(async () => {
+        try { previewTrackRef.current?.stop(); previewTrackRef.current?.close(); } catch (_) {}
+        try { localVidRef.current?.stop();     localVidRef.current?.close();     } catch (_) {}
+        try { localAudRef.current?.stop();     localAudRef.current?.close();     } catch (_) {}
+        try { remoteAudRef.current?.stop();                                       } catch (_) {}
+        try { if (clientRef.current) await clientRef.current.leave();             } catch (_) {}
+        try { if (chatChanRef.current)  supabase.removeChannel(chatChanRef.current);  } catch (_) {}
+        try { if (endedChanRef.current) supabase.removeChannel(endedChanRef.current); } catch (_) {}
+        clientRef.current = null;
+        previewTrackRef.current = null;
+        localVidRef.current = null;
+        localAudRef.current = null;
+        remoteAudRef.current = null;
+    }, []);
 
     // ─────────────────────────────────────────────────────────────────────────
-    //  HOST — Camera preview (before going live)
+    //  HOST — Camera preview
     // ─────────────────────────────────────────────────────────────────────────
-    const startCameraPreview = async () => {
+    const startPreview = async () => {
         try {
-            const camTrack = await AgoraRTC.createCameraVideoTrack({
-                encoderConfig: { width: 640, height: 480, frameRate: 15, bitrateMax: 800 },
+            const cam = await AgoraRTC.createCameraVideoTrack({
+                encoderConfig: { width: 1280, height: 720, frameRate: 24, bitrateMax: 1200 },
             });
-            previewTrackRef.current = camTrack;
-            setCameraReady(true);
-            setPreviewReady(true);
+            previewTrackRef.current = cam;
+            setCameraOk(true);
+            // Play into div — wait for next paint so the div is in the DOM
+            requestAnimationFrame(() => {
+                if (previewDivRef.current) cam.play(previewDivRef.current);
+            });
         } catch (err: any) {
-            showToast('Camera access denied — check permissions.', 'error');
+            console.warn('[KSU-Live] Camera preview failed:', err);
+            showToast('Camera access denied — check browser permissions.', 'error');
         }
     };
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  HOST — Go Live
+    // ─────────────────────────────────────────────────────────────────────────
     const startStreaming = async () => {
-        if (!title.trim()) { showToast('Please enter a stream title', 'error'); return; }
+        if (!title.trim()) { showToast('Please enter a stream title.', 'error'); return; }
         setLoading(true);
-        let insertedStreamId: string | null = null;
+        let insertedId: string | null = null;
+
         try {
-            // 1. Create DB record
-            const { data: stream, error: sErr } = await supabase
+            // 1. Insert DB record
+            const { data: stream, error: dbErr } = await supabase
                 .from('live_streams')
                 .insert({ host_id: user!.id, title: title.trim(), status: 'live' })
-                .select().single();
-            if (sErr) throw sErr;
-            insertedStreamId = stream.id;
-            const sid = stream.id;
+                .select()
+                .single();
+            if (dbErr) throw dbErr;
+            insertedId = stream.id;
+            const sid  = stream.id;
             setStreamId(sid);
 
-            // 2. Create Agora client in live-host mode
-            const client = AgoraRTC.createClient({ mode: 'live', codec: 'h264' });
+            // 2. Create Agora client
+            const client = AgoraRTC.createClient({ mode: 'live', codec: 'vp8' });
             clientRef.current = client;
             await client.setClientRole('host');
 
-            // 3. Fetch a publisher token from our Vercel token server
-            const uid = Math.floor(Math.random() * 999999);
-            const token = await fetchAgoraToken(sid, uid, 'publisher');
+            // 3. Generate token (client-side — no server needed)
+            const uid   = Math.floor(Math.random() * 999_999) + 1;
+            const token = buildAgoraToken(sid, uid, 'publisher');
 
-            // 4. Join channel with token
+            // 4. Join channel
             await client.join(AGORA_APP_ID, sid, token, uid);
 
-            // 4. Re-use preview camera track if available, otherwise create fresh
+            // 5. Re-use preview track if available, else create fresh
             let videoTrack: ICameraVideoTrack;
             if (previewTrackRef.current) {
                 videoTrack = previewTrackRef.current;
                 previewTrackRef.current = null;
             } else {
                 videoTrack = await AgoraRTC.createCameraVideoTrack({
-                    encoderConfig: { width: 640, height: 480, frameRate: 15, bitrateMax: 800 },
+                    encoderConfig: { width: 1280, height: 720, frameRate: 24, bitrateMax: 1200 },
                 });
             }
             const audioTrack = await AgoraRTC.createMicrophoneAudioTrack();
+            localVidRef.current = videoTrack;
+            localAudRef.current = audioTrack;
 
-            localVideoTrackRef.current = videoTrack;
-            localAudioTrackRef.current = audioTrack;
-
-            // 5. Publish both tracks
+            // 6. Publish tracks
             await client.publish([videoTrack, audioTrack]);
 
-            // 6. Render local preview
-            if (localVideoElRef.current) videoTrack.play(localVideoElRef.current);
+            // 7. Render local preview into live div
+            requestAnimationFrame(() => {
+                if (localDivRef.current) videoTrack.play(localDivRef.current);
+            });
 
-            // 7. Viewer count tracking
-            client.on('user-joined',  () => setViewerCount(c => c + 1));
-            client.on('user-left',    () => setViewerCount(c => Math.max(0, c - 1)));
+            // 8. Viewer count listeners
+            client.on('user-joined', () => setViewerCount(c => c + 1));
+            client.on('user-left',   () => setViewerCount(c => Math.max(0, c - 1)));
 
-            // 8. Setup chat
-            setupChatChannel(sid);
+            // 9. Chat
+            setupChat(sid);
 
             setIsBroadcasting(true);
+            setPhase('live');
             setLoading(false);
-            showToast('🎥 You are now LIVE! Viewers can join from their feed.', 'success');
-        } catch (err: any) {
-            console.error('[KSU-Live] Host start failed:', err);
+            showToast('🎥 You are now LIVE!', 'success');
 
-            // ── Clean up the DB record so it never shows as a ghost stream ──
-            if (insertedStreamId) {
+        } catch (err: any) {
+            console.error('[KSU-Live] Go-live failed:', err);
+            if (insertedId) {
                 await supabase.from('live_streams')
                     .update({ status: 'ended', ended_at: new Date().toISOString() })
-                    .eq('id', insertedStreamId);
+                    .eq('id', insertedId);
             }
-
-            // ── Detect the Agora App Certificate error ──
-            const msg: string = err?.message || String(err);
-            if (msg.includes('CAN_NOT_GET_GATEWAY_SERVER') || msg.includes('dynamic use static key')) {
-                showToast(
-                    '⚠️ Agora App Certificate is ON. Go to console.agora.io → your project → Edit → disable "Primary Certificate" → Save.',
-                    'error'
-                );
-            } else {
-                showToast('Could not start stream: ' + msg, 'error');
-            }
+            await doCleanup();
+            const msg = err?.message ?? String(err);
+            showToast('Could not start stream: ' + msg, 'error');
             setLoading(false);
         }
     };
 
     // ─────────────────────────────────────────────────────────────────────────
-    //  HOST — Stop
+    //  HOST — End stream
     // ─────────────────────────────────────────────────────────────────────────
     const stopStreaming = async () => {
         if (!window.confirm('End this live stream?')) return;
@@ -249,70 +255,69 @@ export default function LiveStreamModal({
                     .update({ status: 'ended', ended_at: new Date().toISOString() })
                     .eq('id', streamId);
             }
-            await cleanup();
-            showToast('Live stream ended.', 'success');
-            onClose();
-        } catch (err) {
-            onClose();
-        }
+        } catch (_) {}
+        await doCleanup();
+        onClose();
     };
 
     // ─────────────────────────────────────────────────────────────────────────
     //  VIEWER — Join stream
     // ─────────────────────────────────────────────────────────────────────────
-    const startViewing = async () => {
+    const joinStream = async (sid: string) => {
         setLoading(true);
         try {
-            // Check stream still live
+            // Verify still live
             const { data: streamData } = await supabase
-                .from('live_streams').select('*').eq('id', streamId!).single();
+                .from('live_streams').select('*').eq('id', sid).single();
             if (!streamData || streamData.status === 'ended') {
                 showToast('This stream has already ended.', 'info');
                 onClose();
                 return;
             }
 
-            // Create audience client
-            const client = AgoraRTC.createClient({ mode: 'live', codec: 'h264' });
+            // Create client
+            const client = AgoraRTC.createClient({ mode: 'live', codec: 'vp8' });
             clientRef.current = client;
-            await client.setClientRole('audience', { level: 1 }); // 1 = low latency
+            await client.setClientRole('audience', { level: 1 });
 
-            // Fetch a subscriber token
-            const uid = Math.floor(Math.random() * 999999);
-            const token = await fetchAgoraToken(streamId!, uid, 'subscriber');
+            // Generate token
+            const uid   = Math.floor(Math.random() * 999_999) + 1;
+            const token = buildAgoraToken(sid, uid, 'subscriber');
 
-            // Join channel
-            await client.join(AGORA_APP_ID, streamId!, token, uid);
+            // Join
+            await client.join(AGORA_APP_ID, sid, token, uid);
 
-            // ── When host publishes video / audio ─────────────────────────
+            // Handle incoming tracks
             client.on('user-published', async (remoteUser: IAgoraRTCRemoteUser, mediaType: 'video' | 'audio') => {
                 await client.subscribe(remoteUser, mediaType);
 
                 if (mediaType === 'video') {
-                    if (remoteVideoElRef.current) {
-                        remoteUser.videoTrack?.play(remoteVideoElRef.current);
-                    }
-                    setConnected(true);
+                    // Play into the remote div — it's always mounted in the viewer phase
+                    requestAnimationFrame(() => {
+                        if (remoteDivRef.current && remoteUser.videoTrack) {
+                            remoteUser.videoTrack.play(remoteDivRef.current);
+                        }
+                    });
+                    setRemoteVideoReady(true);
                     setLoading(false);
                 }
 
                 if (mediaType === 'audio') {
-                    remoteAudioTrackRef.current = remoteUser.audioTrack;
-                    // Only play if viewer has already tapped unmute
-                    if (!viewerMuted) remoteUser.audioTrack?.play();
+                    remoteAudRef.current = remoteUser.audioTrack ?? null;
+                    // audio only plays after user taps unmute (browser autoplay policy)
                 }
             });
 
             client.on('user-unpublished', (_user: IAgoraRTCRemoteUser, mediaType: 'video' | 'audio') => {
-                if (mediaType === 'video') setConnected(false);
+                if (mediaType === 'video') setRemoteVideoReady(false);
             });
 
-            // ── Watch for stream end in DB ─────────────────────────────────
+            // Watch for stream ending in DB
             const endedChan = supabase
-                .channel(`stream_ended_view_${streamId}`)
+                .channel(`stream_ended_${sid}`)
                 .on('postgres_changes', {
                     event: 'UPDATE', schema: 'public',
-                    table: 'live_streams', filter: `id=eq.${streamId}`,
+                    table: 'live_streams', filter: `id=eq.${sid}`,
                 }, (payload) => {
                     if ((payload.new as any).status === 'ended') {
                         showToast('The host has ended this stream.', 'info');
@@ -320,17 +325,17 @@ export default function LiveStreamModal({
                     }
                 })
                 .subscribe();
-            endedChannelRef.current = endedChan;
+            endedChanRef.current = endedChan;
 
             // Setup chat
-            setupChatChannel(streamId!);
+            setupChat(sid);
 
-            // Fallback timeout to clear spinner
-            setTimeout(() => setLoading(false), 15000);
+            // Fallback: clear spinner after 20s if video never arrives
+            setTimeout(() => setLoading(false), 20_000);
 
         } catch (err: any) {
             console.error('[KSU-Live] Viewer join failed:', err);
-            showToast('Failed to join stream: ' + (err.message || err), 'error');
+            showToast('Failed to join stream: ' + (err.message ?? err), 'error');
             onClose();
         }
     };
@@ -338,69 +343,66 @@ export default function LiveStreamModal({
     // ─────────────────────────────────────────────────────────────────────────
     //  CHAT
     // ─────────────────────────────────────────────────────────────────────────
-    const setupChatChannel = (sid: string) => {
+    const setupChat = (sid: string) => {
         const chan = supabase.channel(`stream_chat:${sid}`);
         chan.on('broadcast', { event: 'chat' }, ({ payload }: any) => {
             setChatMessages(prev => [...prev, {
-                id: Math.random().toString(),
+                id:         Math.random().toString(36).slice(2),
                 senderId:   payload.senderId,
                 senderName: payload.senderName,
                 text:       payload.text,
                 timestamp:  Date.now(),
             }]);
         }).subscribe();
-        chatChannelRef.current = chan;
+        chatChanRef.current = chan;
     };
 
-    const sendChatMessage = (e: React.FormEvent) => {
+    const sendChat = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!messageText.trim() || !chatChannelRef.current) return;
-        chatChannelRef.current.send({
-            type: 'broadcast', event: 'chat',
-            payload: {
-                senderId:   user!.id,
-                senderName: profile?.username || 'User',
-                text:       messageText.trim(),
-            },
-        });
-        setChatMessages(prev => [...prev, {
-            id: Math.random().toString(),
+        if (!messageText.trim() || !chatChanRef.current) return;
+        const msg = {
             senderId:   user!.id,
-            senderName: profile?.username || 'User',
+            senderName: profile?.username ?? 'User',
             text:       messageText.trim(),
-            timestamp:  Date.now(),
+        };
+        chatChanRef.current.send({ type: 'broadcast', event: 'chat', payload: msg });
+        setChatMessages(prev => [...prev, {
+            id:        Math.random().toString(36).slice(2),
+            timestamp: Date.now(),
+            ...msg,
         }]);
         setMessageText('');
     };
 
     // ─────────────────────────────────────────────────────────────────────────
-    //  HOST CONTROLS
+    //  HOST MEDIA TOGGLES
     // ─────────────────────────────────────────────────────────────────────────
     const toggleVideo = () => {
-        const track = localVideoTrackRef.current;
-        if (!track) return;
-        track.setEnabled(!videoEnabled);
-        setVideoEnabled(v => !v);
+        const t = localVidRef.current;
+        if (!t) return;
+        const next = !videoOn;
+        t.setEnabled(next);
+        setVideoOn(next);
     };
 
     const toggleAudio = () => {
-        const track = localAudioTrackRef.current;
-        if (!track) return;
-        track.setEnabled(!audioEnabled);
-        setAudioEnabled(a => !a);
+        const t = localAudRef.current;
+        if (!t) return;
+        const next = !audioOn;
+        t.setEnabled(next);
+        setAudioOn(next);
     };
 
     // ─────────────────────────────────────────────────────────────────────────
-    //  VIEWER: UNMUTE
+    //  VIEWER AUDIO
     // ─────────────────────────────────────────────────────────────────────────
-    const handleViewerUnmute = () => {
+    const unmute = () => {
+        remoteAudRef.current?.play();
         setViewerMuted(false);
-        remoteAudioTrackRef.current?.play();
     };
-
-    const handleViewerMute = () => {
+    const mute = () => {
+        remoteAudRef.current?.stop();
         setViewerMuted(true);
-        remoteAudioTrackRef.current?.stop();
     };
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -410,12 +412,16 @@ export default function LiveStreamModal({
         <div className="stream-overlay">
             <div className="stream-container">
 
-                {/* ═══ VIDEO PANEL ═══════════════════════════════════════════ */}
+                {/* ══════════════ VIDEO PANEL ══════════════════════════════ */}
                 <div className="stream-video-panel">
 
                     {/* Top bar */}
                     <div className="stream-top-bar">
-                        <button className="stream-close-btn" onClick={isHost ? stopStreaming : onClose}>
+                        <button
+                            className="stream-close-btn"
+                            onClick={isHost && isBroadcasting ? stopStreaming : onClose}
+                            title={isHost && isBroadcasting ? 'End stream' : 'Close'}
+                        >
                             <X size={18} />
                         </button>
 
@@ -431,14 +437,14 @@ export default function LiveStreamModal({
                             </div>
                         )}
 
-                        {!isBroadcasting && isHost && (
+                        {!isBroadcasting && isHost && phase === 'setup' && (
                             <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: '0.85rem', fontWeight: 600 }}>
                                 Live Setup
                             </div>
                         )}
 
-                        {!isHost && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'rgba(255,255,255,0.7)', fontSize: '0.8rem' }}>
+                        {phase === 'viewer' && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'rgba(255,255,255,0.75)', fontSize: '0.8rem' }}>
                                 <Eye size={13} /> Watching live
                             </div>
                         )}
@@ -447,42 +453,47 @@ export default function LiveStreamModal({
                     {/* Loading overlay */}
                     {loading && (
                         <div className="stream-loading">
-                            <div className="spinner" style={{ width: 40, height: 40, borderWidth: 3 }} />
-                            <p style={{ marginTop: 14 }}>
+                            <div className="spinner" style={{ width: 44, height: 44, borderWidth: 3 }} />
+                            <p style={{ marginTop: 14, fontWeight: 600 }}>
                                 {isHost ? 'Starting broadcast…' : 'Joining stream…'}
                             </p>
                         </div>
                     )}
 
-                    {/* ── HOST: Setup screen (before going live) ─────────── */}
-                    {isHost && !isBroadcasting && (
+                    {/* ── HOST SETUP SCREEN ─────────────────────────────── */}
+                    {isHost && phase === 'setup' && (
                         <div className="stream-setup">
-                            {/* Live camera preview */}
+                            {/* Camera preview — always in DOM so the ref is stable */}
                             <div
-                                ref={previewVideoElRef}
+                                ref={previewDivRef}
                                 style={{
                                     position: 'absolute', inset: 0,
-                                    display: cameraReady ? 'block' : 'none',
-                                    transform: 'scaleX(-1)',
                                     background: '#000',
+                                    display: cameraOk ? 'block' : 'none',
+                                    transform: 'scaleX(-1)',
                                 }}
                             />
 
                             <div className="stream-setup-overlay">
-                                {cameraReady ? (
+                                {cameraOk ? (
                                     <div className="stream-cam-ready">
                                         <span className="stream-cam-dot" />
                                         <span>Camera Ready</span>
                                     </div>
                                 ) : (
                                     <div style={{ textAlign: 'center' }}>
-                                        <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'linear-gradient(135deg,#a78bfa,#7c3aed)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 10px' }}>
+                                        <div style={{
+                                            width: 52, height: 52, borderRadius: '50%',
+                                            background: 'linear-gradient(135deg,#a78bfa,#7c3aed)',
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                            margin: '0 auto 10px',
+                                        }}>
                                             <Radio size={24} color="white" />
                                         </div>
                                         <p style={{ color: 'rgba(255,255,255,0.75)', fontSize: '0.82rem', marginBottom: 10 }}>
-                                            Camera not available. Check permissions.
+                                            Camera not available — check permissions.
                                         </p>
-                                        <button onClick={startCameraPreview} className="btn btn-sm" style={{ background: 'rgba(167,139,250,0.35)', color: 'white' }}>
+                                        <button onClick={startPreview} className="btn btn-sm" style={{ background: 'rgba(167,139,250,0.35)', color: 'white' }}>
                                             Retry Camera
                                         </button>
                                     </div>
@@ -496,11 +507,6 @@ export default function LiveStreamModal({
                                     maxLength={80}
                                 />
 
-                                <div className="stream-info-hint">
-                                    <Info size={11} />
-                                    <span>Powered by Agora — viewers see & hear you in real time</span>
-                                </div>
-
                                 <button
                                     className="stream-go-live-btn"
                                     onClick={startStreaming}
@@ -512,123 +518,132 @@ export default function LiveStreamModal({
                         </div>
                     )}
 
-                    {/* ── HOST: Broadcasting view ─────────────────────────── */}
-                    {isHost && isBroadcasting && (
+                    {/* ── HOST BROADCASTING VIEW ────────────────────────── */}
+                    {isHost && phase === 'live' && (
                         <div
-                            ref={localVideoElRef}
+                            ref={localDivRef}
                             style={{
                                 position: 'absolute', inset: 0,
                                 background: '#000',
-                                transform: 'scaleX(-1)', // mirror selfie
+                                transform: 'scaleX(-1)',
                             }}
                         />
                     )}
 
-                    {/* ── VIEWER: Remote stream ───────────────────────────── */}
-                    {!isHost && streamId && (
+                    {/* ── VIEWER: REMOTE STREAM ─────────────────────────── */}
+                    {phase === 'viewer' && (
                         <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-                            {/* Agora renders video here */}
+                            {/* Agora renders host video here */}
                             <div
-                                ref={remoteVideoElRef}
+                                ref={remoteDivRef}
                                 style={{ position: 'absolute', inset: 0, background: '#000' }}
                             />
 
-                            {/* Connecting overlay */}
-                            {!connected && !loading && (
-                                <div className="stream-loading" style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}>
-                                    <div className="spinner" style={{ width: 40, height: 40, borderWidth: 3, marginBottom: 14 }} />
-                                    <p style={{ opacity: 0.9 }}>Waiting for host to start…</p>
-                                    <p style={{ fontSize: '0.75rem', opacity: 0.5, marginTop: 6 }}>
-                                        Powered by Agora
-                                    </p>
+                            {/* Waiting overlay while video is connecting */}
+                            {!remoteVideoReady && !loading && (
+                                <div className="stream-loading" style={{ background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)' }}>
+                                    <div className="spinner" style={{ width: 44, height: 44, borderWidth: 3, marginBottom: 14 }} />
+                                    <p style={{ opacity: 0.9, fontWeight: 600 }}>Waiting for host video…</p>
                                 </div>
                             )}
 
-                            {/* Audio controls — always visible */}
-                            <div style={{
-                                position: 'absolute', bottom: 70, left: '50%',
-                                transform: 'translateX(-50%)',
-                                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
-                                zIndex: 10,
-                            }}>
-                                {viewerMuted ? (
-                                    <div
-                                        onClick={handleViewerUnmute}
-                                        style={{
-                                            background: 'rgba(0,0,0,0.85)',
-                                            borderRadius: 99, padding: '14px 30px',
-                                            display: 'flex', alignItems: 'center', gap: 10,
-                                            cursor: 'pointer', color: 'white',
-                                            fontSize: '1rem', fontWeight: 800,
-                                            border: '2px solid rgba(255,255,255,0.45)',
-                                            backdropFilter: 'blur(12px)',
-                                            boxShadow: '0 4px 32px rgba(0,0,0,0.7)',
-                                            animation: 'pulse 2s infinite',
-                                            whiteSpace: 'nowrap',
-                                        }}
-                                    >
-                                        <Volume2 size={20} />
-                                        🔇 Tap to hear audio
-                                    </div>
-                                ) : (
-                                    <div style={{
-                                        display: 'flex', alignItems: 'center', gap: 10,
-                                        background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(10px)',
-                                        borderRadius: 99, padding: '8px 18px',
-                                        border: '1px solid rgba(255,255,255,0.2)',
-                                    }}>
-                                        <Volume2 size={16} color="white" />
-                                        <span style={{ color: 'white', fontSize: '0.8rem', fontWeight: 600 }}>🔊 Audio on</span>
-                                        <button
-                                            onClick={handleViewerMute}
+                            {/* Viewer audio controls */}
+                            {remoteVideoReady && (
+                                <div style={{
+                                    position: 'absolute', bottom: 72, left: '50%',
+                                    transform: 'translateX(-50%)',
+                                    zIndex: 10,
+                                }}>
+                                    {viewerMuted ? (
+                                        <div
+                                            onClick={unmute}
                                             style={{
-                                                background: 'transparent', border: 'none',
-                                                color: 'rgba(255,255,255,0.6)', cursor: 'pointer',
-                                                fontSize: '0.7rem', fontWeight: 600,
+                                                background: 'rgba(0,0,0,0.85)',
+                                                borderRadius: 99, padding: '12px 28px',
+                                                display: 'flex', alignItems: 'center', gap: 10,
+                                                cursor: 'pointer', color: 'white',
+                                                fontSize: '0.95rem', fontWeight: 800,
+                                                border: '2px solid rgba(255,255,255,0.4)',
+                                                backdropFilter: 'blur(12px)',
+                                                boxShadow: '0 4px 32px rgba(0,0,0,0.7)',
+                                                animation: 'pulse 2s infinite',
+                                                whiteSpace: 'nowrap',
                                             }}
-                                        >Mute</button>
-                                    </div>
-                                )}
-                            </div>
+                                        >
+                                            <Volume2 size={20} /> Tap to hear audio
+                                        </div>
+                                    ) : (
+                                        <div style={{
+                                            display: 'flex', alignItems: 'center', gap: 10,
+                                            background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(10px)',
+                                            borderRadius: 99, padding: '8px 16px',
+                                            border: '1px solid rgba(255,255,255,0.2)',
+                                        }}>
+                                            <Volume2 size={16} color="white" />
+                                            <span style={{ color: 'white', fontSize: '0.8rem', fontWeight: 600 }}>🔊 Audio on</span>
+                                            <button
+                                                onClick={mute}
+                                                style={{
+                                                    background: 'transparent', border: 'none',
+                                                    color: 'rgba(255,255,255,0.6)', cursor: 'pointer',
+                                                    fontSize: '0.7rem', fontWeight: 700,
+                                                }}
+                                            >
+                                                <VolumeX size={14} />
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     )}
 
-                    {/* ── HOST controls while broadcasting ───────────────── */}
-                    {isHost && isBroadcasting && (
+                    {/* ── HOST CONTROLS WHILE LIVE ─────────────────────── */}
+                    {isHost && phase === 'live' && !loading && (
                         <div className="stream-controls">
                             <button
                                 onClick={toggleVideo}
                                 className="stream-ctrl-btn"
-                                style={{ background: videoEnabled ? 'rgba(255,255,255,0.15)' : 'rgba(239,68,68,0.3)', color: videoEnabled ? 'white' : '#ef4444' }}
+                                title={videoOn ? 'Turn off camera' : 'Turn on camera'}
+                                style={{
+                                    background: videoOn ? 'rgba(255,255,255,0.15)' : 'rgba(239,68,68,0.3)',
+                                    color: videoOn ? 'white' : '#ef4444',
+                                }}
                             >
-                                {videoEnabled ? <Video size={18} /> : <VideoOff size={18} />}
+                                {videoOn ? <Video size={18} /> : <VideoOff size={18} />}
                             </button>
                             <button
                                 onClick={toggleAudio}
                                 className="stream-ctrl-btn"
-                                style={{ background: audioEnabled ? 'rgba(255,255,255,0.15)' : 'rgba(239,68,68,0.3)', color: audioEnabled ? 'white' : '#ef4444' }}
+                                title={audioOn ? 'Mute mic' : 'Unmute mic'}
+                                style={{
+                                    background: audioOn ? 'rgba(255,255,255,0.15)' : 'rgba(239,68,68,0.3)',
+                                    color: audioOn ? 'white' : '#ef4444',
+                                }}
                             >
-                                {audioEnabled ? <Mic size={18} /> : <MicOff size={18} />}
+                                {audioOn ? <Mic size={18} /> : <MicOff size={18} />}
                             </button>
                             <button onClick={stopStreaming} className="stream-end-btn">End</button>
                         </div>
                     )}
                 </div>
 
-                {/* ═══ CHAT PANEL ════════════════════════════════════════════ */}
+                {/* ══════════════ CHAT PANEL ══════════════════════════════ */}
                 <div className={`stream-chat-panel ${chatOpen ? 'chat-open' : ''}`}>
-                    <div className="stream-chat-header" onClick={() => setChatOpen(!chatOpen)} style={{ cursor: 'pointer' }}>
+                    <div
+                        className="stream-chat-header"
+                        onClick={() => setChatOpen(o => !o)}
+                        style={{ cursor: 'pointer' }}
+                    >
                         <Radio size={14} style={{ color: '#a78bfa' }} />
                         <span>Live Chat {chatMessages.length > 0 && `(${chatMessages.length})`}</span>
                         <span className="stream-chat-toggle">{chatOpen ? '▼' : '▲'}</span>
-                        {isHost && isBroadcasting && (
-                            <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.5)', display: 'flex', alignItems: 'center', gap: 3 }}>
-                                <Info size={10} /> Share you're live!
-                            </span>
-                        )}
                     </div>
 
                     <div className="stream-chat-messages">
+                        {chatMessages.length === 0 && (
+                            <div className="stream-chat-empty">Welcome to chat! Say hello 👋</div>
+                        )}
                         {chatMessages.map(msg => (
                             <div key={msg.id} className="stream-chat-msg">
                                 <span className="stream-chat-name" style={{ color: '#06b6d4' }}>
@@ -637,13 +652,10 @@ export default function LiveStreamModal({
                                 <span className="stream-chat-text">{msg.text}</span>
                             </div>
                         ))}
-                        {chatMessages.length === 0 && (
-                            <div className="stream-chat-empty">Welcome to chat! Say hello 👋</div>
-                        )}
                         <div ref={chatEndRef} />
                     </div>
 
-                    <form onSubmit={sendChatMessage} className="stream-chat-form">
+                    <form onSubmit={sendChat} className="stream-chat-form">
                         <input
                             className="stream-chat-input"
                             placeholder="Send a message…"
