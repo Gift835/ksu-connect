@@ -111,6 +111,23 @@ export default function LiveStreamModal({
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [chatMessages]);
 
+    // ── Play preview AFTER React shows the preview div (cameraOk → display:block)
+    //    requestAnimationFrame fires BEFORE re-render on mobile — useEffect is correct
+    useEffect(() => {
+        if (cameraOk && previewTrackRef.current && previewDivRef.current) {
+            previewTrackRef.current.play(previewDivRef.current);
+        }
+    }, [cameraOk]);
+
+    // ── Play local video AFTER React mounts the live div (phase → 'live')
+    //    The localDivRef div only exists in the DOM when phase === 'live',
+    //    so we must wait until after the state update is committed.
+    useEffect(() => {
+        if (phase === 'live' && localVidRef.current && localDivRef.current) {
+            localVidRef.current.play(localDivRef.current);
+        }
+    }, [phase]);
+
     // ── On mount: start preview (host) or join stream (viewer) ────────────
     useEffect(() => {
         if (isHost) {
@@ -159,14 +176,14 @@ export default function LiveStreamModal({
     const startPreview = async () => {
         try {
             const cam = await AgoraRTC.createCameraVideoTrack({
+                // facingMode:'user' selects front camera on mobile devices
                 encoderConfig: { width: 1280, height: 720, frameRate: 24, bitrateMax: 1200 },
+                facingMode: 'user',
             });
             previewTrackRef.current = cam;
             setCameraOk(true);
-            // Play into div — wait for next paint so the div is in the DOM
-            requestAnimationFrame(() => {
-                if (previewDivRef.current) cam.play(previewDivRef.current);
-            });
+            // Video playback is handled by the useEffect watching cameraOk
+            // (RAF would fire before React re-renders — useEffect is correct for mobile)
         } catch (err: any) {
             console.warn('[KSU-Live] Camera preview failed:', err);
             showToast('Camera access denied — check browser permissions.', 'error');
@@ -221,11 +238,8 @@ export default function LiveStreamModal({
 
             // 6. Publish tracks
             await client.publish([videoTrack, audioTrack]);
-
-            // 7. Render local preview into live div
-            requestAnimationFrame(() => {
-                if (localDivRef.current) videoTrack.play(localDivRef.current);
-            });
+            // Local video playback is handled by the useEffect watching phase
+            // (must wait until React renders the live div into the DOM)
 
             // 8. Accurate viewer count — use Agora's own remoteUsers list
             //    (manual ±1 can drift; remoteUsers.length is always exact)
