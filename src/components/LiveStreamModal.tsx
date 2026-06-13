@@ -515,7 +515,6 @@ export default function LiveStreamModal({
                                     position: 'absolute', inset: 0,
                                     background: '#000',
                                     display: cameraOk ? 'block' : 'none',
-                                    transform: 'scaleX(-1)',
                                 }}
                             />
 
@@ -570,7 +569,6 @@ export default function LiveStreamModal({
                             style={{
                                 position: 'absolute', inset: 0,
                                 background: '#000',
-                                transform: 'scaleX(-1)',
                             }}
                         />
                     )}
