@@ -1,4 +1,4 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
+import type { VercelRequest, VercelResponse } from './vercel-types';
 import { RtcTokenBuilder, RtcRole } from 'agora-token';
 
 // ─── Agora token endpoint ─────────────────────────────────────────────────────
