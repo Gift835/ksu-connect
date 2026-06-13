@@ -18,11 +18,19 @@ const AGORA_APP_ID = 'c63f70ea4bbe48a3821166f59aa2d8d1';
 // Fetch a short-lived token from the Vercel serverless function
 async function fetchAgoraToken(channel: string, uid: number, role: 'publisher' | 'subscriber'): Promise<string> {
     const res = await fetch(`/api/agora-token?channel=${encodeURIComponent(channel)}&uid=${uid}&role=${role}`);
-    if (!res.ok) throw new Error('Token server error: ' + res.status);
+    if (!res.ok) {
+        let detail = '';
+        try { detail = (await res.json()).error ?? ''; } catch (_) {}
+        const hint = res.status === 404
+            ? ' (run `vercel dev` locally or deploy to Vercel)'
+            : detail ? ` — ${detail}` : '';
+        throw new Error(`Token server ${res.status}${hint}`);
+    }
     const data = await res.json();
     if (!data.token) throw new Error('No token returned from server');
     return data.token;
 }
+
 
 interface LiveStreamModalProps {
     streamId?: string;
